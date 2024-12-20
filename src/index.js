@@ -264,9 +264,7 @@ const server = net.createServer((clientSocket) => {
         logInfo({
             event: '代理模式',
             app: appName || '未知应用',
-            proxy: `${targetProxy.host}:${targetProxy.port}`,
-            rule: Object.entries(config.proxy_app_map)
-                .find(([, apps]) => apps.some(app => appName.includes(app.toLowerCase())))?.[0]
+            proxy: `${targetProxy.host}:${targetProxy.port}`
         });
 
         proxySocket.connect(targetProxy.port, targetProxy.host, () => {
@@ -350,7 +348,43 @@ process.on('SIGTERM', gracefulShutdown); // kill
 process.on('SIGHUP', gracefulShutdown);  // 终端关闭
 
 // 启动服务器
-const PORT = 8080;
-server.listen(PORT, () => {
-    logInfo(`代理服务器启动在端口 ${PORT}`);
+const { host, port, backlog } = config.server;
+
+// 验证端口范围
+if (port < 1 || port > 65535) {
+    logError({
+        event: '配置错误',
+        error: `端口号 ${port} 无效，必须在 1-65535 之间`
+    });
+    process.exit(1);
+}
+
+// 启动服务器并处理可能的错误
+server.listen(port, host, backlog, () => {
+    const address = server.address();
+    logInfo({
+        event: '服务器启动',
+        address: address.address,
+        port: address.port,
+        family: address.family
+    });
+});
+
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        logError({
+            event: '服务器错误',
+            error: `端口 ${port} 已被占用`
+        });
+    } else if (err.code === 'EACCES') {
+        logError({
+            event: '服务器错误',
+            error: `没有权限绑定端口 ${port}，如果端口小于 1024 需要管理员权限`
+        });
+    } else {
+        logError({
+            event: '服务器错误'
+        }, err);
+    }
+    process.exit(1);
 });

@@ -1,3 +1,9 @@
+# 服务器配置
+server:
+  host: "0.0.0.0"    # 监听所有网卡
+  port: 8080         # 监听端口
+  backlog: 1024       # TCP 连接队列大小
+
 # 功能配置
 features:
   record_apps:
