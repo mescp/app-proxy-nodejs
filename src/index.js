@@ -142,6 +142,66 @@ function parseFileSize(size) {
     return parseInt(size);
 }
 
+// 系统代理管理函数
+function getNetworkServices() {
+    try {
+        const output = execSync('networksetup -listallnetworkservices').toString();
+        // 过滤掉第一行（标题）和带星号的禁用服务
+        return output.split('\n')
+            .slice(1)
+            .filter(service => service && !service.startsWith('*'));
+    } catch (error) {
+        logError({
+            event: '获取网络服务列表失败',
+            error: error.message
+        });
+        return [];
+    }
+}
+
+function setSystemProxy(enable) {
+    const services = getNetworkServices();
+    const proxyHost = '127.0.0.1'; // 本地代理
+    
+    for (const service of services) {
+        try {
+            if (enable) {
+                // 设置 HTTP 代理
+                execSync(`networksetup -setwebproxy "${service}" ${proxyHost} ${config.server.port}`);
+                execSync(`networksetup -setwebproxystate "${service}" on`);
+                
+                // 设置 HTTPS 代理
+                execSync(`networksetup -setsecurewebproxy "${service}" ${proxyHost} ${config.server.port}`);
+                execSync(`networksetup -setsecurewebproxystate "${service}" on`);
+                
+                logInfo({
+                    event: '系统代理设置',
+                    service: service,
+                    status: '已启用',
+                    proxy: `${proxyHost}:${config.server.port}`
+                });
+            } else {
+                // 关闭 HTTP 代理
+                execSync(`networksetup -setwebproxystate "${service}" off`);
+                // 关闭 HTTPS 代理
+                execSync(`networksetup -setsecurewebproxystate "${service}" off`);
+                
+                logInfo({
+                    event: '系统代理设置',
+                    service: service,
+                    status: '已禁用'
+                });
+            }
+        } catch (error) {
+            logError({
+                event: '系统代理设置失败',
+                service: service,
+                error: error.message
+            });
+        }
+    }
+}
+
 // 创建缓存实例
 const appCache = new NodeCache({ stdTTL: 300 }); // 5分钟缓存
 
@@ -317,6 +377,9 @@ const server = net.createServer((clientSocket) => {
 function gracefulShutdown() {
     logInfo('正在关闭代理服务器...');
     
+    // 关闭系统代理
+    setSystemProxy(false);
+    
     // 停止接受新的连接
     server.close(() => {
         logInfo('服务器已停止接受新连接');
@@ -368,6 +431,9 @@ server.listen(port, host, backlog, () => {
         port: address.port,
         family: address.family
     });
+
+    // 设置系统代理
+    setSystemProxy(true);
 });
 
 server.on('error', (err) => {
