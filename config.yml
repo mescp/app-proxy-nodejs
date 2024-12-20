@@ -1,8 +1,25 @@
 # 功能配置
 features:
   record_apps:
-    description: Record all applications that pass through the proxy
     enabled: true
+
+# 日志配置
+logging:
+  console:
+    enabled: true
+    level: info
+  file:
+    error_log:
+      enabled: true
+      level: error
+      filename: error.log
+    combined_log:
+      enabled: true
+      level: info
+      filename: combined.log
+    directory: logs
+    max_size: 10m      # 单个日志文件最大大小
+    max_files: 5       # 保留的日志文件数量
 
 # 代理应用程序映射配置
 proxy_app_map:

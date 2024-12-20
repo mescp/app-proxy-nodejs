@@ -1,29 +1,149 @@
 const net = require('net');
 const fs = require('fs');
+const path = require('path');
 const yaml = require('yaml');
 const winston = require('winston');
 const NodeCache = require('node-cache');
 const { execSync } = require('child_process');
 
+// 加载配置
+const config = yaml.parse(fs.readFileSync('./config.yml', 'utf8'));
+
+// 确保日志目录存在
+if (config.logging.file.error_log.enabled || config.logging.file.combined_log.enabled) {
+    const logDir = config.logging.file.directory;
+    if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true });
+    }
+}
+
 // 配置日志
+const transports = [];
+
+// 添加控制台日志
+if (config.logging.console.enabled) {
+    transports.push(new winston.transports.Console({
+        level: config.logging.console.level,
+        format: winston.format.combine(
+            winston.format.colorize(),
+            winston.format.timestamp(),
+            winston.format.printf((info) => {
+                const { level, timestamp, message, ...rest } = info;
+                let logMessage = `${timestamp} ${level}: `;
+
+                // 如果message是对象，将其合并到rest中
+                if (typeof message === 'object' && message !== null) {
+                    Object.assign(rest, message);
+                } else if (typeof message === 'string') {
+                    logMessage += message;
+                }
+
+                // 处理rest中的字段
+                if (Object.keys(rest).length > 0) {
+                    if (rest.event) logMessage += `[${rest.event}] `;
+                    if (rest.app) logMessage += `应用=${rest.app} `;
+                    if (rest.target) logMessage += `目标=${rest.target} `;
+                    if (rest.proxy) logMessage += `代理=${rest.proxy} `;
+                    if (rest.mode) logMessage += `模式=${rest.mode} `;
+                    if (rest.error) logMessage += `错误=${rest.error} `;
+                    if (rest.rule) logMessage += `规则=${rest.rule} `;
+
+                    // 添加其他字段
+                    Object.entries(rest).forEach(([key, value]) => {
+                        if (value !== undefined && 
+                            !['event', 'app', 'target', 'proxy', 'mode', 'error', 'rule', 'stack', 'level', 'timestamp'].includes(key)) {
+                            logMessage += `${key}=${value} `;
+                        }
+                    });
+                }
+
+                return logMessage.trim() || `${timestamp} ${level}: <空日志>`;
+            })
+        )
+    }));
+}
+
+// 添加错误日志
+if (config.logging.file.error_log.enabled) {
+    transports.push(new winston.transports.File({
+        filename: path.join(config.logging.file.directory, config.logging.file.error_log.filename),
+        level: config.logging.file.error_log.level,
+        maxsize: parseFileSize(config.logging.file.max_size),
+        maxFiles: config.logging.file.max_files,
+        format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.json()
+        )
+    }));
+}
+
+// 添加综合日志
+if (config.logging.file.combined_log.enabled) {
+    transports.push(new winston.transports.File({
+        filename: path.join(config.logging.file.directory, config.logging.file.combined_log.filename),
+        level: config.logging.file.combined_log.level,
+        maxsize: parseFileSize(config.logging.file.max_size),
+        maxFiles: config.logging.file.max_files,
+        format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.json()
+        )
+    }));
+}
+
+// 创建日志实例
 const logger = winston.createLogger({
-    level: 'info',
     format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.json()
     ),
-    transports: [
-        new winston.transports.File({ filename: 'error.log', level: 'error' }),
-        new winston.transports.File({ filename: 'combined.log' }),
-        new winston.transports.Console()
-    ]
+    transports: transports
 });
+
+// 封装日志函数，确保正确处理对象
+function logInfo(data) {
+    if (typeof data === 'string') {
+        logger.info(data);
+    } else {
+        logger.info({ ...data });
+    }
+}
+
+function logError(data, error) {
+    if (error) {
+        logger.error({
+            ...data,
+            error: error.message,
+            stack: error.stack,
+            code: error.code,
+            errno: error.errno,
+            syscall: error.syscall,
+            address: error.address,
+            port: error.port
+        });
+    } else {
+        logger.error(data);
+    }
+}
+
+// 解析文件大小配置（如：10m, 1g）
+function parseFileSize(size) {
+    const units = {
+        'k': 1024,
+        'm': 1024 * 1024,
+        'g': 1024 * 1024 * 1024
+    };
+    
+    const match = size.toString().match(/^(\d+)([kmg])$/i);
+    if (match) {
+        const [, number, unit] = match;
+        return parseInt(number) * units[unit.toLowerCase()];
+    }
+    return parseInt(size);
+}
 
 // 创建缓存实例
 const appCache = new NodeCache({ stdTTL: 300 }); // 5分钟缓存
-
-// 加载配置
-const config = yaml.parse(fs.readFileSync('./config.yml', 'utf8'));
 
 // 获取应用程序名称（仅支持macOS）
 function getAppNameByPort(port) {
@@ -37,7 +157,7 @@ function getAppNameByPort(port) {
         }
         return null;
     } catch (error) {
-        logger.error('Error getting app name:', error);
+        logError('Error getting app name:', error);
         return null;
     }
 }
@@ -78,21 +198,27 @@ const server = net.createServer((clientSocket) => {
         const targetProxy = appName ? getProxyByApp(appName) : null;
 
         if (!targetProxy) {
-            logger.info({
-                message: '没有配置代理，切换为透明代理模式',
-                app: appName
-            });
             // 解析原始请求数据以获取目标地址和端口
             const firstLine = data.toString().split('\n')[0];
             const match = firstLine.match(/^(?:CONNECT\s+)?(\S+):(\d+)/i);
             if (match) {
                 const [, host, port] = match;
+                logInfo({
+                    event: '透明代理模式',
+                    app: appName || '未知应用',
+                    target: `${host}:${port}`,
+                    mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
+                });
+
                 const directSocket = new net.Socket();
                 directSocket.connect(parseInt(port), host, () => {
-                    logger.info({
-                        message: '直接连接目标地址成功',
-                        target: `${host}:${port}`
+                    logInfo({
+                        event: '直连成功',
+                        app: appName || '未知应用',
+                        target: `${host}:${port}`,
+                        mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
                     });
+
                     if (firstLine.startsWith('CONNECT')) {
                         clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
                     } else {
@@ -101,21 +227,32 @@ const server = net.createServer((clientSocket) => {
                     clientSocket.pipe(directSocket);
                     directSocket.pipe(clientSocket);
                     
-                    // 添加直接连接到活动连接集合
                     activeConnections.add(directSocket);
                     
-                    // 当连接关闭时从集合中移除
                     directSocket.on('close', () => {
+                        logInfo({
+                            event: '直连关闭',
+                            app: appName || '未知应用',
+                            target: `${host}:${port}`
+                        });
                         activeConnections.delete(directSocket);
                     });
                 });
                 directSocket.on('error', (err) => {
-                    logger.error('直接连接错误:', err);
+                    logError({
+                        event: '直连错误',
+                        app: appName || '未知应用',
+                        target: `${host}:${port}`
+                    }, err);
                     activeConnections.delete(directSocket);
                     clientSocket.destroy();
                 });
             } else {
-                logger.error('无法解析目标地址');
+                logError({
+                    event: '解析失败',
+                    app: appName || '未知应用',
+                    data: firstLine
+                });
                 clientSocket.destroy();
             }
             return;
@@ -124,55 +261,71 @@ const server = net.createServer((clientSocket) => {
         // 创建到目标代理的连接
         const proxySocket = new net.Socket();
         
+        logInfo({
+            event: '代理模式',
+            app: appName || '未知应用',
+            proxy: `${targetProxy.host}:${targetProxy.port}`,
+            rule: Object.entries(config.proxy_app_map)
+                .find(([, apps]) => apps.some(app => appName.includes(app.toLowerCase())))?.[0]
+        });
+
         proxySocket.connect(targetProxy.port, targetProxy.host, () => {
-            logger.info({
-                message: 'Proxy connection established',
-                app: appName,
-                target: `${targetProxy.host}:${targetProxy.port}`
+            logInfo({
+                event: '代理连接成功',
+                app: appName || '未知应用',
+                proxy: `${targetProxy.host}:${targetProxy.port}`
             });
 
             proxySocket.write(data);
             clientSocket.pipe(proxySocket);
             proxySocket.pipe(clientSocket);
             
-            // 添加代理连接到活动连接集合
             activeConnections.add(proxySocket);
             
-            // 当连接关闭时从集合中移除
             proxySocket.on('close', () => {
+                logInfo({
+                    event: '代理连接关闭',
+                    app: appName || '未知应用',
+                    proxy: `${targetProxy.host}:${targetProxy.port}`
+                });
                 activeConnections.delete(proxySocket);
             });
         });
 
         proxySocket.on('error', (err) => {
-            logger.error('Proxy connection error:', err);
+            logError({
+                event: '代理连接错误',
+                app: appName || '未知应用',
+                proxy: `${targetProxy.host}:${targetProxy.port}`
+            }, err);
             activeConnections.delete(proxySocket);
             clientSocket.destroy();
         });
     });
 
-    // 当客户端连接关闭时从集合中移除
     clientSocket.on('close', () => {
         activeConnections.delete(clientSocket);
     });
 
     clientSocket.on('error', (err) => {
-        logger.error('Client connection error:', err);
+        logError({
+            event: '客户端连接错误'
+        }, err);
         activeConnections.delete(clientSocket);
     });
 });
 
 // 优雅退出处理
 function gracefulShutdown() {
-    logger.info('正在关闭代理服务器...');
+    logInfo('正在关闭代理服务器...');
     
     // 停止接受新的连接
     server.close(() => {
-        logger.info('服务器已停止接受新连接');
+        logInfo('服务器已停止接受新连接');
     });
     
     // 关闭所有活动连接
-    logger.info(`正在关闭 ${activeConnections.size} 个活动连接...`);
+    logInfo(`正在关闭 ${activeConnections.size} 个活动连接...`);
     for (const socket of activeConnections) {
         socket.end();
     }
@@ -186,7 +339,7 @@ function gracefulShutdown() {
         
         // 清理其他资源
         appCache.close();
-        logger.info('所有连接已关闭，正在退出程序');
+        logInfo('所有连接已关闭，正在退出程序');
         process.exit(0);
     }, 2000); // 等待2秒后强制关闭
 }
@@ -199,5 +352,5 @@ process.on('SIGHUP', gracefulShutdown);  // 终端关闭
 // 启动服务器
 const PORT = 8080;
 server.listen(PORT, () => {
-    logger.info(`Proxy server listening on port ${PORT}`);
+    logInfo(`代理服务器启动在端口 ${PORT}`);
 });
