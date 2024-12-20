@@ -12,6 +12,8 @@ proxy_app_map:
   "10.20.30.1:8888":
     - "com.apple.webkit.networking"
     - "safari"
+    - "code helper (plugin)"
+    - "node"
   "127.0.0.1:8081":
     - "firefox"
 

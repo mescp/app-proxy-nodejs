@@ -226,7 +226,10 @@ function getAppNameByPort(port) {
         const lines = output.split('\n');
         const clientLine = lines.find(line => line.includes(`${port}`));
         if (clientLine) {
-            return clientLine.split(/\s+/)[0].toLocaleLowerCase();
+            const appName = clientLine.split(/\s+/)[0].toLowerCase();
+            return appName.replace(/\\x([0-9A-Fa-f]{2})/g, (match, hex) => {
+                return String.fromCharCode(parseInt(hex, 16));
+            });
         }
         return null;
     } catch (error) {
