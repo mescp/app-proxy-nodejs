@@ -146,10 +146,15 @@ function parseFileSize(size) {
 function getNetworkServices() {
     try {
         const output = execSync('networksetup -listallnetworkservices').toString();
-        // 过滤掉第一行（标题）和带星号的禁用服务
+        // 过滤掉第一行（标题）、带星号的禁用服务和排除列表中的服务
+        const excludedServices = new Set(config.server.excluded_services || []);
         return output.split('\n')
             .slice(1)
-            .filter(service => service && !service.startsWith('*'));
+            .filter(service => 
+                service && 
+                !service.startsWith('*') && 
+                !excludedServices.has(service.trim())
+            );
     } catch (error) {
         logError({
             event: '获取网络服务列表失败',
@@ -162,6 +167,14 @@ function getNetworkServices() {
 function setSystemProxy(enable) {
     const services = getNetworkServices();
     const proxyHost = '127.0.0.1'; // 本地代理
+    
+    if (services.length === 0) {
+        logInfo({
+            event: '系统代理设置',
+            status: '没有可用的网络服务'
+        });
+        return;
+    }
     
     for (const service of services) {
         try {
