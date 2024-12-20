@@ -224,7 +224,7 @@ function getAppNameByPort(port) {
         const cmd = `lsof -n -P -sTCP:ESTABLISHED +c0 -i :${port}`;
         const output = execSync(cmd).toString();
         const lines = output.split('\n');
-        const clientLine = lines.find(line => line.includes(`${port}`));
+        const clientLine = lines.find(line => line.includes(`${port}->`));
         if (clientLine) {
             const appName = clientLine.split(/\s+/)[0].toLowerCase();
             return appName.replace(/\\x([0-9A-Fa-f]{2})/g, (match, hex) => {
@@ -251,6 +251,12 @@ function getProxyByApp(appName) {
 
 // 跟踪所有活动的连接
 const activeConnections = new Set();
+
+// 配置文件路径
+const CONFIG_PATH = path.join(__dirname, '..', 'config.yml');
+
+// 标记服务器状态
+let isShuttingDown = false;
 
 // 创建代理服务器
 const server = net.createServer((clientSocket) => {
@@ -389,8 +395,48 @@ const server = net.createServer((clientSocket) => {
     });
 });
 
+// 加载配置
+function loadConfig() {
+    try {
+        const configContent = fs.readFileSync(CONFIG_PATH, 'utf8');
+        return yaml.parse(configContent);
+    } catch (error) {
+        console.error('加载配置文件失败:', error);
+        process.exit(1);
+    }
+}
+
+// 监听配置文件变化
+fs.watch(CONFIG_PATH, (eventType) => {
+    if (eventType === 'change') {
+        logInfo({
+            event: '配置文件变更',
+            action: '准备重启服务'
+        });
+        
+        try {
+            // 尝试加载新配置以验证格式
+            const newConfig = loadConfig();
+            
+            // 如果新配置加载成功，触发重启
+            gracefulShutdown(true);
+        } catch (error) {
+            logError({
+                event: '配置文件重载失败',
+                error: error.message
+            });
+        }
+    }
+});
+
 // 优雅退出处理
-function gracefulShutdown() {
+function gracefulShutdown(restart = false) {
+    // 防止重复调用
+    if (isShuttingDown) {
+        return;
+    }
+    isShuttingDown = true;
+
     logInfo('正在关闭代理服务器...');
     
     // 关闭系统代理
@@ -416,15 +462,44 @@ function gracefulShutdown() {
         
         // 清理其他资源
         appCache.close();
-        logInfo('所有连接已关闭，正在退出程序');
+        
+        if (restart) {
+            logInfo('配置已更新，正在重启服务...');
+            // 使用 node 重启当前进程
+            const scriptPath = path.join(__dirname, 'index.js');
+            execSync(`node "${scriptPath}"`, {
+                stdio: 'inherit',
+                detached: true
+            });
+        }
+        
+        logInfo(restart ? '重启进程中...' : '所有连接已关闭，正在退出程序');
         process.exit(0);
     }, 2000); // 等待2秒后强制关闭
 }
 
+// 处理未捕获的异常
+process.on('uncaughtException', (error) => {
+    logError({
+        event: '未捕获的异常',
+        error: error.message,
+        stack: error.stack
+    });
+    gracefulShutdown();
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    logError({
+        event: '未处理的Promise拒绝',
+        error: reason
+    });
+    gracefulShutdown();
+});
+
 // 监听终止信号
-process.on('SIGINT', gracefulShutdown);  // Ctrl+C
-process.on('SIGTERM', gracefulShutdown); // kill
-process.on('SIGHUP', gracefulShutdown);  // 终端关闭
+process.on('SIGINT', () => gracefulShutdown());   // Ctrl+C
+process.on('SIGTERM', () => gracefulShutdown());  // kill
+process.on('SIGHUP', () => gracefulShutdown());   // 终端关闭
 
 // 启动服务器
 const { host, port, backlog } = config.server;

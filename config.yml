@@ -13,7 +13,7 @@ proxy_app_map:
     - "com.apple.webkit.networking"
     - "safari"
     - "code helper (plugin)"
-    - "node"
+
   "127.0.0.1:8081":
     - "firefox"
 
@@ -34,3 +34,4 @@ logging:
     directory: logs
     max_size: 10m      # 单个日志文件最大大小
     max_files: 5       # 保留的日志文件数量
+
