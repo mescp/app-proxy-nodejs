@@ -1,0 +1,19 @@
+# 默认代理配置
+default_proxy:
+  host: 127.0.0.1
+  port: 8081
+
+# 功能配置
+features:
+  record_apps:
+    description: Record all applications that pass through the proxy
+    enabled: true
+
+# 代理应用程序映射配置
+proxy_app_map:
+  "10.20.30.1:8888":
+    - "com.apple.webkit.networking"
+    - "safari"
+  "127.0.0.1:8081":
+    - "chrome"
+    - "firefox"
