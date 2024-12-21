@@ -1,7 +1,7 @@
 const net = require('net');
-const { execSync } = require('child_process');
 const NodeCache = require('node-cache');
 const { loadConfig, createLoggers, watchConfig, CONFIG_PATH } = require('./config');
+const ProxyManager = require('./proxyManager');
 
 // 加载配置和创建日志实例
 const { config, logger } = loadConfig();
@@ -10,10 +10,13 @@ const { logInfo, logError } = createLoggers(logger);
 // 创建缓存实例
 const appCache = new NodeCache({ stdTTL: 300 }); // 5分钟缓存
 
+// 创建代理管理器实例
+const proxyManager = new ProxyManager(config, { info: logInfo, error: logError });
+
 // 系统代理管理函数
 function getNetworkServices() {
     try {
-        const output = execSync('networksetup -listallnetworkservices').toString();
+        const output = proxyManager.getNetworkServices();
         // 过滤掉第一行（标题）、带星号的禁用服务和排除列表中的服务
         const excludedServices = new Set(config.server.excluded_services || []);
         return output.split('\n')
@@ -32,75 +35,9 @@ function getNetworkServices() {
     }
 }
 
-function setSystemProxy(enable) {
-    const services = getNetworkServices();
-    const proxyHost = '127.0.0.1'; // 本地代理
-    
-    if (services.length === 0) {
-        logInfo({
-            event: '系统代理设置',
-            status: '没有可用的网络服务'
-        });
-        return;
-    }
-    
-    for (const service of services) {
-        try {
-            if (enable) {
-                // 设置 HTTP 代理
-                execSync(`networksetup -setwebproxy "${service}" ${proxyHost} ${config.server.port}`);
-                execSync(`networksetup -setwebproxystate "${service}" on`);
-                
-                // 设置 HTTPS 代理
-                execSync(`networksetup -setsecurewebproxy "${service}" ${proxyHost} ${config.server.port}`);
-                execSync(`networksetup -setsecurewebproxystate "${service}" on`);
-                
-                logInfo({
-                    event: '系统代理设置',
-                    service: service,
-                    status: '已启用',
-                    proxy: `${proxyHost}:${config.server.port}`
-                });
-            } else {
-                // 关闭 HTTP 代理
-                execSync(`networksetup -setwebproxystate "${service}" off`);
-                // 关闭 HTTPS 代理
-                execSync(`networksetup -setsecurewebproxystate "${service}" off`);
-                
-                logInfo({
-                    event: '系统代理设置',
-                    service: service,
-                    status: '已禁用'
-                });
-            }
-        } catch (error) {
-            logError({
-                event: '系统代理设置失败',
-                service: service,
-                error: error.message
-            });
-        }
-    }
-}
-
 // 获取应用程序名称（仅支持macOS）
 function getAppNameByPort(port) {
-    try {
-        const cmd = `lsof -n -P -sTCP:ESTABLISHED +c0 -i :${port}`;
-        const output = execSync(cmd).toString();
-        const lines = output.split('\n');
-        const clientLine = lines.find(line => line.includes(`${port}->`));
-        if (clientLine) {
-            const appName = clientLine.split(/\s+/)[0].toLowerCase();
-            return appName.replace(/\\x([0-9A-Fa-f]{2})/g, (match, hex) => {
-                return String.fromCharCode(parseInt(hex, 16));
-            });
-        }
-        return null;
-    } catch (error) {
-        logError('Error getting app name:', error);
-        return null;
-    }
+    return proxyManager.getAppNameByPort(port);
 }
 
 // 根据应用名称获取代理
@@ -112,6 +49,11 @@ function getProxyByApp(appName) {
         }
     }
     return null;  // 如果没有匹配的代理配置，返回 null
+}
+
+// 处理系统代理设置
+function setSystemProxy(enable) {
+    proxyManager.setSystemProxy(enable);
 }
 
 // 跟踪所有活动的连接
@@ -303,11 +245,12 @@ function gracefulShutdown(restart = false) {
         if (restart) {
             logInfo('配置已更新，正在重启服务...');
             // 使用 node 重启当前进程
-            const scriptPath = path.join(__dirname, 'index.js');
-            execSync(`node "${scriptPath}"`, {
+            const scriptPath = require('path').join(__dirname, 'index.js');
+            const child = require('child_process').spawn('node', [scriptPath], {
                 stdio: 'inherit',
                 detached: true
             });
+            child.unref();
         }
         
         logInfo(restart ? '重启进程中...' : '所有连接已关闭，正在退出程序');
