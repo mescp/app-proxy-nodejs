@@ -263,12 +263,26 @@ function gracefulShutdown(restart = false) {
 
 // 处理未捕获的异常
 process.on('uncaughtException', (error) => {
+    // 判断是否是终端终止导致的 I/O 错误
+  const isTerminalError = (
+    // 检查错误消息
+    error.message === 'write EIO' ||
+    // 检查错误代码
+    error.code === 'EIO' ||
+    // 检查是否是 write EPIPE 错误（管道破裂，通常也与终端断开有关）
+    (error.code === 'EPIPE' && error.syscall === 'write') ||
+    // 检查是否是标准输出/错误流的问题
+    error.message?.includes('stdout') ||
+    error.message?.includes('stderr')
+  );
+  if(!isTerminalError){
     logError({
-        event: '未捕获的异常',
-        error: error.message,
-        stack: error.stack
+      event: "未捕获的异常",
+      error: error.message,
+      stack: error.stack,
     });
     gracefulShutdown();
+  }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
