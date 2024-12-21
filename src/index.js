@@ -1,10 +1,20 @@
 const net = require('net');
 const NodeCache = require('node-cache');
-const { loadConfig, createLoggers, watchConfig, CONFIG_PATH } = require('./config');
+const { loadConfig, createLoggers, watchConfig } = require('./config');
 const ProxyManager = require('./proxyManager');
+const { parseArguments } = require('./cli');
+
+// 在配置加载之前解析命令行参数
+const argv = parseArguments();
 
 // 加载配置和创建日志实例
 const { config, logger } = loadConfig();
+
+// 使用命令行参数覆盖配置
+if (argv.port) {
+  config.server.port = argv.port;
+}
+
 const { logInfo, logError } = createLoggers(logger);
 
 // 创建缓存实例

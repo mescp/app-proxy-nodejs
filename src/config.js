@@ -2,9 +2,15 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('yaml');
 const winston = require('winston');
+const os = require('os');
 
-// 配置文件路径
-const CONFIG_PATH = path.join(process.cwd(), 'config.yml');
+// 配置文件查找顺序
+const CONFIG_PATHS = [
+    path.join(process.cwd(), 'config.yml'),           // 当前工作目录
+    path.join(os.homedir(), '.app-proxy/config.yml'), // 用户主目录下的 .app-proxy 文件夹
+    path.join(__dirname, '../config.yml')             // 项目安装目录
+];
+
 
 // 解析文件大小配置（如：10m, 1g）
 function parseFileSize(size) {
@@ -25,12 +31,12 @@ function parseFileSize(size) {
 // 创建日志实例
 function createLogger(config) {
     const transports = [];
-
+    let logFileDir;
     // 确保日志目录存在
     if (config.logging.file.error_log.enabled || config.logging.file.combined_log.enabled) {
-        const logDir = config.logging.file.directory;
-        if (!fs.existsSync(logDir)) {
-            fs.mkdirSync(logDir, { recursive: true });
+        logFileDir = configFilePath && path.dirname(configFilePath) ? path.join(path.dirname(configFilePath), config.logging.file.directory) : config.logging.file.directory;
+        if (!fs.existsSync(logFileDir)) {
+            fs.mkdirSync(logFileDir, { recursive: true });
         }
     }
 
@@ -80,7 +86,7 @@ function createLogger(config) {
     // 添加错误日志
     if (config.logging.file.error_log.enabled) {
         transports.push(new winston.transports.File({
-            filename: path.join(config.logging.file.directory, config.logging.file.error_log.filename),
+            filename: path.join(logFileDir, config.logging.file.error_log.filename),
             level: config.logging.file.error_log.level,
             maxsize: parseFileSize(config.logging.file.max_size),
             maxFiles: config.logging.file.max_files,
@@ -94,7 +100,7 @@ function createLogger(config) {
     // 添加综合日志
     if (config.logging.file.combined_log.enabled) {
         transports.push(new winston.transports.File({
-            filename: path.join(config.logging.file.directory, config.logging.file.combined_log.filename),
+            filename: path.join(logFileDir, config.logging.file.combined_log.filename),
             level: config.logging.file.combined_log.level,
             maxsize: parseFileSize(config.logging.file.max_size),
             maxFiles: config.logging.file.max_files,
@@ -114,18 +120,86 @@ function createLogger(config) {
     });
 }
 
-// 加载配置
+let configFilePath;
+// 修改加载配置函数
 function loadConfig() {
+    let configFileData;
+    // 按优先级查找配置文件
+    for (const path of CONFIG_PATHS) {
+        if (fs.existsSync(path)) {
+            configFileData = fs.readFileSync(path, 'utf8');
+            configFilePath = path;
+            break;
+        }
+    }
+
+    // 如果没有找到配置文件，创建默认配置
+    if (!configFileData) {
+        const defaultConfigDir = path.join(os.homedir(), '.app-proxy');
+        const defaultConfigPath = path.join(defaultConfigDir, 'config.yml');
+        
+        // 创建配置目录
+        if (!fs.existsSync(defaultConfigDir)) {
+            fs.mkdirSync(defaultConfigDir, { recursive: true });
+        }
+
+        // 创建默认配置文件
+        const defaultConfig = `
+# 服务器配置
+server:
+  host: "0.0.0.0"    # 监听所有网卡
+  port: 8080         # 监听端口
+  backlog: 1024      # TCP 连接队列大小
+  excluded_services: # 不设置代理的网络服务
+    - "Thunderbolt Bridge"
+    - "Thunderbolt Bridge status"
+
+# 代理应用程序映射配置
+proxy_app_map:
+  "127.0.0.1:8081":
+    - "firefox"
+    - "chrome"
+
+# 日志配置
+logging:
+  console:
+    enabled: true
+    level: info
+  file:
+    error_log:
+      enabled: true
+      level: error
+      filename: error.log
+    combined_log:
+      enabled: false
+      level: info
+      filename: combined.log
+    directory: ${defaultConfigDir}/logs
+    max_size: 10m
+    max_files: 5
+`;
+
+        fs.writeFileSync(defaultConfigPath, defaultConfig);
+        configFileData = defaultConfig;
+        configFilePath = defaultConfigPath;
+    }
+
     try {
-        const config = yaml.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+        const config = yaml.parse(configFileData);
         const logger = createLogger(config);
+        
+        // 记录使用的配置文件路径
+        logger.info({
+            event: '配置加载',
+            path: configFilePath
+        });
+        
         return { config, logger };
     } catch (error) {
-        console.error('加载配置文件失败:', error);
+        console.error('配置文件解析失败:', error);
         process.exit(1);
     }
 }
-
 // 封装日志函数
 function createLoggers(logger) {
     return {
@@ -157,7 +231,7 @@ function createLoggers(logger) {
 
 // 监听配置文件变化
 function watchConfig(callback) {
-    fs.watch(CONFIG_PATH, (eventType) => {
+    fs.watch(configFilePath, (eventType) => {
         if (eventType === 'change') {
             callback();
         }
@@ -165,8 +239,8 @@ function watchConfig(callback) {
 }
 
 module.exports = {
-    CONFIG_PATH,
     loadConfig,
     createLoggers,
     watchConfig
 };
+

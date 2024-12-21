@@ -52,6 +52,11 @@ npm start
 
 默认情况下，代理服务器将在端口 8080 上运行。
 
+## 全局安装
+
+```bash
+npm install -g app-proxy-nodejs
+
 ## 日志
 
 - `error.log`: 记录错误信息

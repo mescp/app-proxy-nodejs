@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "An intelligent proxy application that routes traffic based on application names",
   "main": "src/index.js",
+  "bin": {
+    "app-proxy": "./bin/app-proxy"
+  },
   "scripts": {
     "start": "node src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -10,7 +13,8 @@
   "dependencies": {
     "yaml": "^2.3.4",
     "winston": "^3.11.0",
-    "node-cache": "^5.1.2"
+    "node-cache": "^5.1.2",
+    "yargs": "^17.7.2"
   },
   "keywords": [
     "proxy",
