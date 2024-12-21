@@ -13,28 +13,6 @@ const appCache = new NodeCache({ stdTTL: 300 }); // 5分钟缓存
 // 创建代理管理器实例
 const proxyManager = new ProxyManager(config, { info: logInfo, error: logError });
 
-// 系统代理管理函数
-function getNetworkServices() {
-    try {
-        const output = proxyManager.getNetworkServices();
-        // 过滤掉第一行（标题）、带星号的禁用服务和排除列表中的服务
-        const excludedServices = new Set(config.server.excluded_services || []);
-        return output.split('\n')
-            .slice(1)
-            .filter(service => 
-                service && 
-                !service.startsWith('*') && 
-                !excludedServices.has(service.trim())
-            );
-    } catch (error) {
-        logError({
-            event: '获取网络服务列表失败',
-            error: error.message
-        });
-        return [];
-    }
-}
-
 // 获取应用程序名称（仅支持macOS）
 function getAppNameByPort(port) {
     return proxyManager.getAppNameByPort(port);
@@ -251,6 +229,8 @@ function gracefulShutdown(restart = false) {
                 detached: true
             });
             child.unref();
+            //子进程与主进程分离，提示关闭子进程需要通过kill id 的方法
+            logInfo(`子进程与主进程分离，如需关闭进程，请使用以下命令：$ kill ${child.pid}` );
         }
         
         logInfo(restart ? '重启进程中...' : '所有连接已关闭，正在退出程序');
