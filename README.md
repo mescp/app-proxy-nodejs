@@ -56,6 +56,7 @@ npm start
 
 ```bash
 npm install -g app-proxy-nodejs
+```
 
 ## 日志
 

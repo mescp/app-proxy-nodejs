@@ -64,8 +64,8 @@ const server = net.createServer((clientSocket) => {
         if (!appName) {
             appName = getAppNameByPort(clientPort);
             if (appName) {
-                appCache.set(clientPort, appName);
-            }
+              appCache.set(clientPort, appName);
+            } 
         }
 
         // 获取目标代理
@@ -78,7 +78,7 @@ const server = net.createServer((clientSocket) => {
             if (match) {
                 const [, host, port] = match;
                 logInfo({
-                    event: '透明代理模式',
+                    event: '透明代理',
                     app: appName || '未知应用',
                     target: `${host}:${port}`,
                     mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
@@ -123,7 +123,7 @@ const server = net.createServer((clientSocket) => {
                 });
             } else {
                 logError({
-                    event: '解析失败',
+                    event: '解析HTTP失败',
                     app: appName || '未知应用',
                     data: firstLine
                 });
