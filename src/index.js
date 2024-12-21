@@ -74,9 +74,22 @@ const server = net.createServer((clientSocket) => {
         if (!targetProxy) {
             // 解析原始请求数据以获取目标地址和端口
             const firstLine = data.toString().split('\n')[0];
-            const match = firstLine.match(/^(?:CONNECT\s+)?(\S+):(\d+)/i);
-            if (match) {
-                const [, host, port] = match;
+            let host, port;
+            if (firstLine.startsWith('CONNECT')) {
+                // HTTPS format: CONNECT host:port HTTP/1.1
+                const match = firstLine.match(/^CONNECT\s+([^:\s]+):(\d+)/i);
+                if (match) {
+                    [, host, port] = match;
+                }
+            } else {
+                // HTTP format: GET http://host:port/path or GET /path HTTP/1.1
+                const match = firstLine.match(/^[A-Z]+\s+(?:https?:\/\/)?([^:\/\s]+):?(\d+)?/i);
+                if (match) {
+                    [, host, port] = match;
+                    port = port || '80'; // Default to port 80 for HTTP
+                }
+            }
+            if(host && port) {
                 logInfo({
                     event: '透明代理',
                     app: appName || '未知应用',
@@ -123,7 +136,7 @@ const server = net.createServer((clientSocket) => {
                 });
             } else {
                 logError({
-                    event: '解析HTTP失败',
+                    event: '解析失败',
                     app: appName || '未知应用',
                     data: firstLine
                 });
