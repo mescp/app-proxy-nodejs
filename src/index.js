@@ -1,45 +1,8 @@
 const net = require('net');
-const NodeCache = require('node-cache');
 const { loadConfig, createLoggers, watchConfig } = require('./config');
 const ProxyManager = require('./proxyManager');
 const { parseArguments } = require('./cli');
 const ProxyServer = require('./proxyServer');
-
-class ResourceManager {
-    constructor() {
-        this.activeConnections = new Set();
-        this.isShuttingDown = false;
-        this.appCache = new NodeCache({ stdTTL: 300 });
-    }
-
-    addConnection(socket) {
-        this.activeConnections.add(socket);
-    }
-
-    removeConnection(socket) {
-        this.activeConnections.delete(socket);
-    }
-
-    closeConnections() {
-        for (const socket of this.activeConnections) {
-            socket.end();
-        }
-    }
-
-    forceCloseConnections() {
-        for (const socket of this.activeConnections) {
-            socket.destroy();
-        }
-    }
-
-    cleanup() {
-        this.appCache.close();
-    }
-
-    get connectionsCount() {
-        return this.activeConnections.size;
-    }
-}
 
 class ErrorHandler {
     constructor(logger) {
@@ -108,9 +71,6 @@ if (argv.port) {
 
 const { logInfo, logError, logWarn } = createLoggers(logger);
 
-// 创建资源管理器实例
-const resourceManager = new ResourceManager();
-
 // 创建错误处理器实例
 const errorHandler = new ErrorHandler({ error: logError });
 
@@ -119,12 +79,10 @@ const proxyManager = new ProxyManager(config, { info: logInfo, error: logError }
 
 // 创建代理服务器实例
 const proxyServer = new ProxyServer(config, {
-    appCache: resourceManager.appCache,
     proxyManager,
     logInfo,
     logWarn,
-    logError,
-    activeConnections: resourceManager.activeConnections
+    logError
 });
 
 // 创建代理服务器
@@ -137,25 +95,19 @@ function setSystemProxy(enable) {
 
 // 优雅退出处理
 function gracefulShutdown(restart = false) {
-    if (resourceManager.isShuttingDown) {
-        return;
-    }
-    resourceManager.isShuttingDown = true;
-
-    logInfo('正在关闭代理服务器...');
+    proxyServer.shutdown();
     
+    logInfo('正在关闭代理服务器...');
     setSystemProxy(false);
     
-    server.close(() => {
+    proxyServer.closeServer(() => {
         logInfo('服务器已停止接受新连接');
     });
     
-    logInfo(`正在关闭 ${resourceManager.connectionsCount} 个活动连接...`);
-    resourceManager.closeConnections();
+    logInfo(`正在关闭 ${proxyServer.connectionsCount} 个活动连接...`);
     
     setTimeout(() => {
-        resourceManager.forceCloseConnections();
-        resourceManager.cleanup();
+        proxyServer.forceShutdown();
         
         if (restart) {
             logInfo('配置已更新，正在重启服务...');

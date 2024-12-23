@@ -1,15 +1,51 @@
 const net = require('net');
+const NodeCache = require('node-cache');
+
+class ResourceManager {
+    constructor() {
+        this.activeConnections = new Set();
+        this.isShuttingDown = false;
+        this.appCache = new NodeCache({ stdTTL: 300 });
+    }
+
+    addConnection(socket) {
+        this.activeConnections.add(socket);
+    }
+
+    removeConnection(socket) {
+        this.activeConnections.delete(socket);
+    }
+
+    closeConnections() {
+        for (const socket of this.activeConnections) {
+            socket.end();
+        }
+    }
+
+    forceCloseConnections() {
+        for (const socket of this.activeConnections) {
+            socket.destroy();
+        }
+    }
+
+    cleanup() {
+        this.appCache.close();
+    }
+
+    get connectionsCount() {
+        return this.activeConnections.size;
+    }
+}
 
 class ProxyServer {
-    constructor(config, { appCache, proxyManager, logInfo, logWarn, logError, activeConnections }) {
+    constructor(config, { proxyManager, logInfo, logWarn, logError }) {
         this.config = config;
-        this.appCache = appCache;
         this.proxyManager = proxyManager;
         this.logInfo = logInfo;
         this.logWarn = logWarn;
         this.logError = logError;
-        this.activeConnections = activeConnections;
         this.server = null;
+        this.resources = new ResourceManager();
     }
 
     // 获取应用名称（仅支持macOS）
@@ -29,16 +65,16 @@ class ProxyServer {
     }
 
     handleClientConnection(clientSocket) {
-        this.activeConnections.add(clientSocket);
+        this.resources.addConnection(clientSocket);
         
         clientSocket.once('data', (data) => {
             const clientPort = clientSocket.remotePort;
             
-            let appName = this.appCache.get(clientPort);
+            let appName = this.resources.appCache.get(clientPort);
             if (!appName) {
                 appName = this.getAppNameByPort(clientPort);
                 if (appName) {
-                    this.appCache.set(clientPort, appName);
+                    this.resources.appCache.set(clientPort, appName);
                 }
             }
 
@@ -53,14 +89,14 @@ class ProxyServer {
         });
 
         clientSocket.on('close', () => {
-            this.activeConnections.delete(clientSocket);
+            this.resources.removeConnection(clientSocket);
         });
 
         clientSocket.on('error', (err) => {
             this.logWarn({
                 event: '客户端连接错误'
             }, err);
-            this.activeConnections.delete(clientSocket);
+            this.resources.removeConnection(clientSocket);
         });
     }
 
@@ -82,7 +118,7 @@ class ProxyServer {
         }
 
         if (host && port) {
-            this.createDirectConnection(clientSocket, host, port, firstLine, appName);
+            this.createDirectConnection(clientSocket, host, port, firstLine, appName, data);
         } else {
             this.logWarn({
                 event: '解析失败',
@@ -93,7 +129,7 @@ class ProxyServer {
         }
     }
 
-    createDirectConnection(clientSocket, host, port, firstLine, appName) {
+    createDirectConnection(clientSocket, host, port, firstLine, appName, data) {
         this.logInfo({
             event: '透明代理',
             app: appName || '未知应用',
@@ -118,7 +154,7 @@ class ProxyServer {
             clientSocket.pipe(directSocket);
             directSocket.pipe(clientSocket);
             
-            this.activeConnections.add(directSocket);
+            this.resources.addConnection(directSocket);
             
             directSocket.on('close', () => {
                 this.logInfo({
@@ -126,7 +162,7 @@ class ProxyServer {
                     app: appName || '未知应用',
                     target: `${host}:${port}`
                 });
-                this.activeConnections.delete(directSocket);
+                this.resources.removeConnection(directSocket);
             });
         });
 
@@ -136,7 +172,7 @@ class ProxyServer {
                 app: appName || '未知应用',
                 target: `${host}:${port}`
             }, err);
-            this.activeConnections.delete(directSocket);
+            this.resources.removeConnection(directSocket);
             clientSocket.destroy();
         });
     }
@@ -161,7 +197,7 @@ class ProxyServer {
             clientSocket.pipe(proxySocket);
             proxySocket.pipe(clientSocket);
             
-            this.activeConnections.add(proxySocket);
+            this.resources.addConnection(proxySocket);
             
             proxySocket.on('close', () => {
                 this.logInfo({
@@ -169,7 +205,7 @@ class ProxyServer {
                     app: appName || '未知应用',
                     proxy: `${targetProxy.host}:${targetProxy.port}`
                 });
-                this.activeConnections.delete(proxySocket);
+                this.resources.removeConnection(proxySocket);
             });
         });
 
@@ -179,7 +215,7 @@ class ProxyServer {
                 app: appName || '未知应用',
                 proxy: `${targetProxy.host}:${targetProxy.port}`
             }, err);
-            this.activeConnections.delete(proxySocket);
+            this.resources.removeConnection(proxySocket);
             clientSocket.destroy();
         });
     }
@@ -189,6 +225,29 @@ class ProxyServer {
             this.handleClientConnection(clientSocket);
         });
         return this.server;
+    }
+
+    closeServer(callback) {
+        if (this.server) {
+            this.server.close(callback);
+        }
+    }
+
+    shutdown() {
+        if (this.resources.isShuttingDown) {
+            return;
+        }
+        this.resources.isShuttingDown = true;
+        this.resources.closeConnections();
+    }
+
+    forceShutdown() {
+        this.resources.forceCloseConnections();
+        this.resources.cleanup();
+    }
+
+    get connectionsCount() {
+        return this.resources.connectionsCount;
     }
 }
 
