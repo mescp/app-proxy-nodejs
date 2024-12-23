@@ -3,6 +3,97 @@ const NodeCache = require('node-cache');
 const { loadConfig, createLoggers, watchConfig } = require('./config');
 const ProxyManager = require('./proxyManager');
 const { parseArguments } = require('./cli');
+const ProxyServer = require('./proxyServer');
+
+class ResourceManager {
+    constructor() {
+        this.activeConnections = new Set();
+        this.isShuttingDown = false;
+        this.appCache = new NodeCache({ stdTTL: 300 });
+    }
+
+    addConnection(socket) {
+        this.activeConnections.add(socket);
+    }
+
+    removeConnection(socket) {
+        this.activeConnections.delete(socket);
+    }
+
+    closeConnections() {
+        for (const socket of this.activeConnections) {
+            socket.end();
+        }
+    }
+
+    forceCloseConnections() {
+        for (const socket of this.activeConnections) {
+            socket.destroy();
+        }
+    }
+
+    cleanup() {
+        this.appCache.close();
+    }
+
+    get connectionsCount() {
+        return this.activeConnections.size;
+    }
+}
+
+class ErrorHandler {
+    constructor(logger) {
+        this.logger = logger;
+    }
+
+    isTerminalError(error) {
+        return (
+            error.message === 'write EIO' ||
+            error.code === 'EIO' ||
+            (error.code === 'EPIPE' && error.syscall === 'write') ||
+            error.message?.includes('stdout') ||
+            error.message?.includes('stderr')
+        );
+    }
+
+    handleUncaughtException(error, shutdownCallback) {
+        if (!this.isTerminalError(error)) {
+            this.logger.error({
+                event: "未捕获的异常",
+                error: error.message,
+                stack: error.stack,
+            });
+            shutdownCallback();
+        }
+    }
+
+    handleUnhandledRejection(reason, shutdownCallback) {
+        this.logger.error({
+            event: '未处理的Promise拒绝',
+            error: reason
+        });
+        shutdownCallback();
+    }
+
+    handleServerError(err, port) {
+        if (err.code === 'EADDRINUSE') {
+            this.logger.error({
+                event: '服务器错误',
+                error: `端口 ${port} 已被占用`
+            });
+        } else if (err.code === 'EACCES') {
+            this.logger.error({
+                event: '服务器错误',
+                error: `没有权限绑定端口 ${port}，如果端口小于 1024 需要管理员权限`
+            });
+        } else {
+            this.logger.error({
+                event: '服务器错误'
+            }, err);
+        }
+        process.exit(1);
+    }
+}
 
 // 在配置加载之前解析命令行参数
 const argv = parseArguments();
@@ -12,193 +103,75 @@ const { config, logger } = loadConfig();
 
 // 使用命令行参数覆盖配置
 if (argv.port) {
-  config.server.port = argv.port;
+    config.server.port = argv.port;
 }
 
-const { logInfo, logError,logWarn } = createLoggers(logger);
+const { logInfo, logError, logWarn } = createLoggers(logger);
 
-// 创建缓存实例
-const appCache = new NodeCache({ stdTTL: 300 }); // 5分钟缓存
+// 创建资源管理器实例
+const resourceManager = new ResourceManager();
+
+// 创建错误处理器实例
+const errorHandler = new ErrorHandler({ error: logError });
 
 // 创建代理管理器实例
 const proxyManager = new ProxyManager(config, { info: logInfo, error: logError });
 
-// 获取应用程序名称（仅支持macOS）
-function getAppNameByPort(port) {
-    return proxyManager.getAppNameByPort(port);
-}
+// 创建代理服务器实例
+const proxyServer = new ProxyServer(config, {
+    appCache: resourceManager.appCache,
+    proxyManager,
+    logInfo,
+    logWarn,
+    logError,
+    activeConnections: resourceManager.activeConnections
+});
 
-// 根据应用名称获取代理
-function getProxyByApp(appName) {
-    for (const [proxyAddr, apps] of Object.entries(config.proxy_app_map)) {
-        if (apps.some(app => appName.includes(app.toLowerCase()))) {
-            const [host, port] = proxyAddr.split(':');
-            return { host, port: parseInt(port) };
-        }
-    }
-    return null;  // 如果没有匹配的代理配置，返回 null
-}
+// 创建代理服务器
+const server = proxyServer.createServer();
 
 // 处理系统代理设置
 function setSystemProxy(enable) {
     proxyManager.setSystemProxy(enable);
 }
 
-// 跟踪所有活动的连接
-const activeConnections = new Set();
+// 优雅退出处理
+function gracefulShutdown(restart = false) {
+    if (resourceManager.isShuttingDown) {
+        return;
+    }
+    resourceManager.isShuttingDown = true;
 
-// 标记服务器状态
-let isShuttingDown = false;
-
-// 创建代理服务器
-const server = net.createServer((clientSocket) => {
-    // 添加到活动连接集合
-    activeConnections.add(clientSocket);
+    logInfo('正在关闭代理服务器...');
     
-    clientSocket.once('data', (data) => {
-        // 获取客户端端口
-        const clientPort = clientSocket.remotePort;
+    setSystemProxy(false);
+    
+    server.close(() => {
+        logInfo('服务器已停止接受新连接');
+    });
+    
+    logInfo(`正在关闭 ${resourceManager.connectionsCount} 个活动连接...`);
+    resourceManager.closeConnections();
+    
+    setTimeout(() => {
+        resourceManager.forceCloseConnections();
+        resourceManager.cleanup();
         
-        // 从缓存获取应用名称或重新获取
-        let appName = appCache.get(clientPort);
-        if (!appName) {
-            appName = getAppNameByPort(clientPort);
-            if (appName) {
-              appCache.set(clientPort, appName);
-            } 
+        if (restart) {
+            logInfo('配置已更新，正在重启服务...');
+            const scriptPath = require('path').join(__dirname, 'index.js');
+            const child = require('child_process').spawn('node', [scriptPath], {
+                stdio: 'inherit',
+                detached: true
+            });
+            child.unref();
+            logInfo(`子进程与主进程分离，如需关闭进程，请使用以下命令：$ kill ${child.pid}`);
         }
-
-        // 获取目标代理
-        const targetProxy = appName ? getProxyByApp(appName) : null;
-
-        if (!targetProxy) {
-            // 解析原始请求数据以获取目标地址和端口
-            const firstLine = data.toString().split('\n')[0];
-            let host, port;
-            if (firstLine.startsWith('CONNECT')) {
-                // HTTPS format: CONNECT host:port HTTP/1.1
-                const match = firstLine.match(/^CONNECT\s+([^:\s]+):(\d+)/i);
-                if (match) {
-                    [, host, port] = match;
-                }
-            } else {
-                // HTTP format: GET http://host:port/path or GET /path HTTP/1.1
-                const match = firstLine.match(/^[A-Z]+\s+(?:https?:\/\/)?([^:\/\s]+):?(\d+)?/i);
-                if (match) {
-                    [, host, port] = match;
-                    port = port || '80'; // Default to port 80 for HTTP
-                }
-            }
-            if(host && port) {
-                logInfo({
-                    event: '透明代理',
-                    app: appName || '未知应用',
-                    target: `${host}:${port}`,
-                    mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
-                });
-
-                const directSocket = new net.Socket();
-                directSocket.connect(parseInt(port), host, () => {
-                    logInfo({
-                        event: '直连成功',
-                        app: appName || '未知应用',
-                        target: `${host}:${port}`,
-                        mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
-                    });
-
-                    if (firstLine.startsWith('CONNECT')) {
-                        clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-                    } else {
-                        directSocket.write(data);
-                    }
-                    clientSocket.pipe(directSocket);
-                    directSocket.pipe(clientSocket);
-                    
-                    activeConnections.add(directSocket);
-                    
-                    directSocket.on('close', () => {
-                        logInfo({
-                            event: '直连关闭',
-                            app: appName || '未知应用',
-                            target: `${host}:${port}`
-                        });
-                        activeConnections.delete(directSocket);
-                    });
-                });
-                directSocket.on('error', (err) => {
-                    logWarn({
-                        event: '直连错误',
-                        app: appName || '未知应用',
-                        target: `${host}:${port}`
-                    }, err);
-                    activeConnections.delete(directSocket);
-                    clientSocket.destroy();
-                });
-            } else {
-                logWarn({
-                    event: '解析失败',
-                    app: appName || '未知应用',
-                    data: firstLine
-                });
-                clientSocket.destroy();
-            }
-            return;
-        }
-
-        // 创建到目标代理的连接
-        const proxySocket = new net.Socket();
         
-        logInfo({
-            event: '代理模式',
-            app: appName || '未知应用',
-            proxy: `${targetProxy.host}:${targetProxy.port}`
-        });
-
-        proxySocket.connect(targetProxy.port, targetProxy.host, () => {
-            logInfo({
-                event: '代理连接成功',
-                app: appName || '未知应用',
-                proxy: `${targetProxy.host}:${targetProxy.port}`
-            });
-
-            proxySocket.write(data);
-            clientSocket.pipe(proxySocket);
-            proxySocket.pipe(clientSocket);
-            
-            activeConnections.add(proxySocket);
-            
-            proxySocket.on('close', () => {
-                logInfo({
-                    event: '代理连接关闭',
-                    app: appName || '未知应用',
-                    proxy: `${targetProxy.host}:${targetProxy.port}`
-                });
-                activeConnections.delete(proxySocket);
-            });
-        });
-
-        proxySocket.on('error', (err) => {
-            logWarn({
-                event: '代理连接错误',
-                app: appName || '未知应用',
-                proxy: `${targetProxy.host}:${targetProxy.port}`
-            }, err);
-            activeConnections.delete(proxySocket);
-            clientSocket.destroy();
-        });
-    });
-
-    clientSocket.on('close', () => {
-        activeConnections.delete(clientSocket);
-    });
-
-    clientSocket.on('error', (err) => {
-        logWarn({
-            event: '客户端连接错误'
-        }, err);
-        activeConnections.delete(clientSocket);
-    });
-});
+        logInfo(restart ? '重启进程中...' : '所有连接已关闭，正在退出程序');
+        process.exit(0);
+    }, 2000);
+}
 
 // 监听配置文件变化
 watchConfig(() => {
@@ -209,88 +182,13 @@ watchConfig(() => {
     gracefulShutdown(true);
 });
 
-// 优雅退出处理
-function gracefulShutdown(restart = false) {
-    // 防止重复调用
-    if (isShuttingDown) {
-        return;
-    }
-    isShuttingDown = true;
-
-    logInfo('正在关闭代理服务器...');
-    
-    // 关闭系统代理
-    setSystemProxy(false);
-    
-    // 停止接受新的连接
-    server.close(() => {
-        logInfo('服务器已停止接受新连接');
-    });
-    
-    // 关闭所有活动连接
-    logInfo(`正在关闭 ${activeConnections.size} 个活动连接...`);
-    for (const socket of activeConnections) {
-        socket.end();
-    }
-    
-    // 给连接一些时间优雅关闭
-    setTimeout(() => {
-        // 强制关闭任何仍然存在的连接
-        for (const socket of activeConnections) {
-            socket.destroy();
-        }
-        
-        // 清理其他资源
-        appCache.close();
-        
-        if (restart) {
-            logInfo('配置已更新，正在重启服务...');
-            // 使用 node 重启当前进程
-            const scriptPath = require('path').join(__dirname, 'index.js');
-            const child = require('child_process').spawn('node', [scriptPath], {
-                stdio: 'inherit',
-                detached: true
-            });
-            child.unref();
-            //子进程与主进程分离，提示关闭子进程需要通过kill id 的方法
-            logInfo(`子进程与主进程分离，如需关闭进程，请使用以下命令：$ kill ${child.pid}` );
-        }
-        
-        logInfo(restart ? '重启进程中...' : '所有连接已关闭，正在退出程序');
-        process.exit(0);
-    }, 2000); // 等待2秒后强制关闭
-}
-
-// 处理未捕获的异常
+// 设置错误处理
 process.on('uncaughtException', (error) => {
-    // 判断是否是终端终止导致的 I/O 错误
-  const isTerminalError = (
-    // 检查错误消息
-    error.message === 'write EIO' ||
-    // 检查错误代码
-    error.code === 'EIO' ||
-    // 检查是否是 write EPIPE 错误（管道破裂，通常也与终端断开有关）
-    (error.code === 'EPIPE' && error.syscall === 'write') ||
-    // 检查是否是标准输出/错误流的问题
-    error.message?.includes('stdout') ||
-    error.message?.includes('stderr')
-  );
-  if(!isTerminalError){
-    logError({
-      event: "未捕获的异常",
-      error: error.message,
-      stack: error.stack,
-    });
-    gracefulShutdown();
-  }
+    errorHandler.handleUncaughtException(error, () => gracefulShutdown());
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    logError({
-        event: '未处理的Promise拒绝',
-        error: reason
-    });
-    gracefulShutdown();
+    errorHandler.handleUnhandledRejection(reason, () => gracefulShutdown());
 });
 
 // 监听终止信号
@@ -320,25 +218,7 @@ server.listen(port, host, backlog, () => {
         family: address.family
     });
 
-    // 设置系统代理
     setSystemProxy(true);
 });
 
-server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        logError({
-            event: '服务器错误',
-            error: `端口 ${port} 已被占用`
-        });
-    } else if (err.code === 'EACCES') {
-        logError({
-            event: '服务器错误',
-            error: `没有权限绑定端口 ${port}，如果端口小于 1024 需要管理员权限`
-        });
-    } else {
-        logError({
-            event: '服务器错误'
-        }, err);
-    }
-    process.exit(1);
-});
+server.on('error', (err) => errorHandler.handleServerError(err, port));
