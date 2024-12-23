@@ -12,7 +12,7 @@ proxy_app_map:
   "10.20.30.1:8888":
     - "com.apple.webkit.networking"
     - "code helper (plugin)"
-    - “com.docker.backend”
+    - "com.docker.backend"
 
   "127.0.0.1:8081":
     - "firefox"
@@ -27,10 +27,14 @@ logging:
       enabled: true
       level: error
       filename: error.log
+    warning_log: 
+      enabled: true
+      level: warn
+      filename: warning.log
     combined_log:
       enabled: true
       level: info
       filename: combined.log
     directory: logs
-    max_size: 10m      # 单个日志文件最大大小
-    max_files: 5       # 保留的日志文件数量
+    max_size: 10m
+    max_files: 5

@@ -33,8 +33,13 @@ function createLogger(config) {
     const transports = [];
     let logFileDir;
     // 确保日志目录存在
-    if (config.logging.file.error_log.enabled || config.logging.file.combined_log.enabled) {
-        logFileDir = configFilePath && path.dirname(configFilePath) ? path.join(path.dirname(configFilePath), config.logging.file.directory) : config.logging.file.directory;
+    if (config.logging.file.error_log.enabled || 
+        config.logging.file.warning_log.enabled || 
+        config.logging.file.combined_log.enabled) {
+        logFileDir = configFilePath && path.dirname(configFilePath) 
+            ? path.join(path.dirname(configFilePath), config.logging.file.directory) 
+            : config.logging.file.directory;
+        
         if (!fs.existsSync(logFileDir)) {
             fs.mkdirSync(logFileDir, { recursive: true });
         }
@@ -88,6 +93,19 @@ function createLogger(config) {
         transports.push(new winston.transports.File({
             filename: path.join(logFileDir, config.logging.file.error_log.filename),
             level: config.logging.file.error_log.level,
+            maxsize: parseFileSize(config.logging.file.max_size),
+            maxFiles: config.logging.file.max_files,
+            format: winston.format.combine(
+                winston.format.timestamp(),
+                winston.format.json()
+            )
+        }));
+    }
+    // 警告日志配置
+    if (config.logging.file.warning_log.enabled) {
+        transports.push(new winston.transports.File({
+            filename: path.join(logFileDir, config.logging.file.warning_log.filename),
+            level: config.logging.file.warning_log.level,
             maxsize: parseFileSize(config.logging.file.max_size),
             maxFiles: config.logging.file.max_files,
             format: winston.format.combine(
@@ -170,6 +188,10 @@ logging:
       enabled: true
       level: error
       filename: error.log
+    warning_log:
+      enabled: true
+      level: warn
+      filename: warning.log
     combined_log:
       enabled: false
       level: info
@@ -208,6 +230,20 @@ function createLoggers(logger) {
                 logger.info(data);
             } else {
                 logger.info({ ...data });
+            }
+        },
+        logWarn: (data, warning) => {  // 新增警告日志方法
+            if (warning) {
+                logger.warn({
+                    ...data,
+                    warning: warning.message,
+                    code: warning.code,
+                    syscall: warning.syscall,
+                    address: warning.address,
+                    port: warning.port
+                });
+            } else {
+                logger.warn(data);
             }
         },
         logError: (data, error) => {

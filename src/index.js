@@ -15,7 +15,7 @@ if (argv.port) {
   config.server.port = argv.port;
 }
 
-const { logInfo, logError } = createLoggers(logger);
+const { logInfo, logError,logWarn } = createLoggers(logger);
 
 // 创建缓存实例
 const appCache = new NodeCache({ stdTTL: 300 }); // 5分钟缓存
@@ -126,7 +126,7 @@ const server = net.createServer((clientSocket) => {
                     });
                 });
                 directSocket.on('error', (err) => {
-                    logError({
+                    logWarn({
                         event: '直连错误',
                         app: appName || '未知应用',
                         target: `${host}:${port}`
@@ -135,7 +135,7 @@ const server = net.createServer((clientSocket) => {
                     clientSocket.destroy();
                 });
             } else {
-                logError({
+                logWarn({
                     event: '解析失败',
                     app: appName || '未知应用',
                     data: firstLine
@@ -178,7 +178,7 @@ const server = net.createServer((clientSocket) => {
         });
 
         proxySocket.on('error', (err) => {
-            logError({
+            logWarn({
                 event: '代理连接错误',
                 app: appName || '未知应用',
                 proxy: `${targetProxy.host}:${targetProxy.port}`
@@ -193,7 +193,7 @@ const server = net.createServer((clientSocket) => {
     });
 
     clientSocket.on('error', (err) => {
-        logError({
+        logWarn({
             event: '客户端连接错误'
         }, err);
         activeConnections.delete(clientSocket);
