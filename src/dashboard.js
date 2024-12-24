@@ -13,6 +13,10 @@ class Dashboard {
     }
 
     getProxyByApp(appName) {
+        if (!appName || typeof appName !== 'string') {
+            return '直连';
+        }
+        
         const proxyMap = this.config.proxy_app_map || {};
         for (const [proxyAddr, apps] of Object.entries(proxyMap)) {
             if (apps.some(app => appName.toLowerCase().includes(app.toLowerCase()))) {
@@ -58,12 +62,24 @@ class Dashboard {
                     const keys = this.resourceManager.appCache.keys();
                     
                     keys.forEach(key => {
-                        const appName = this.resourceManager.appCache.get(key);
-                        response[key] = {
-                            value: appName,
-                            ttl: this.resourceManager.appCache.getTtl(key),
-                            proxy: this.getProxyByApp(appName)
-                        };
+                        if (!key) return;  // 跳过无效的key
+                        
+                        try {
+                            const appName = this.resourceManager.appCache.get(key);
+                            const ttl = this.resourceManager.appCache.getTtl(key);
+                            
+                            response[key] = {
+                                value: appName || '未知应用',
+                                ttl: ttl || 0,
+                                proxy: this.getProxyByApp(appName)
+                            };
+                        } catch (err) {
+                            this.logWarn({
+                                message: '[Dashboard] 缓存数据处理警告',
+                                error: err.message,
+                                key: key
+                            });
+                        }
                     });
 
                     res.writeHead(200, { 
@@ -72,6 +88,12 @@ class Dashboard {
                         'Access-Control-Allow-Origin': '*'
                     });
                     res.end(JSON.stringify(response));
+                    
+                    //不打印缓存数据
+                    // this.logInfo({
+                    //     message: '[Dashboard] 缓存数据获取',
+                    //     recordCount: Object.keys(response).length
+                    // });
                     
                 } catch (error) {
                     this.logError({

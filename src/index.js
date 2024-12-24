@@ -133,7 +133,7 @@ function gracefulShutdown(restart = false) {
                 detached: true
             });
             child.unref();
-            logInfo(`子进程与主进程分离，如需关闭进程，请使用以下命令：$ kill ${child.pid}`);
+            logWarn(`子进程与主进程分离，如需关闭进程，请使用以下命令：$ kill ${child.pid}`);
         }
         
         logInfo(restart ? '重启进程中...' : '所有连接已关闭，正在退出程序');
