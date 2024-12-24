@@ -216,7 +216,7 @@ logging:
             path: configFilePath
         });
         
-        return { config, logger };
+        return { config, logger,configFilePath};
     } catch (error) {
         console.error('配置文件解析失败:', error);
         process.exit(1);

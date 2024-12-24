@@ -1,8 +1,17 @@
 const net = require('net');
 const { loadConfig, createLoggers, watchConfig } = require('./config');
 const ProxyManager = require('./proxyManager');
-const { parseArguments } = require('./cli');
+const { parseArguments, handleOpenConfig } = require('./cli');
 const ProxyServer = require('./proxyServer');
+
+// 解析命令行参数
+const argv = parseArguments();
+
+// 如果指定了打开配置文件选项，则打开配置文件并退出
+if (argv['open-config']) {
+    handleOpenConfig();
+    process.exit(0);
+}
 
 class ErrorHandler {
     constructor(logger) {
@@ -57,9 +66,6 @@ class ErrorHandler {
         process.exit(1);
     }
 }
-
-// 在配置加载之前解析命令行参数
-const argv = parseArguments();
 
 // 加载配置和创建日志实例
 const { config, logger } = loadConfig();
