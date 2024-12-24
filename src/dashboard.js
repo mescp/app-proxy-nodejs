@@ -3,10 +3,13 @@ const fs = require('fs');
 const path = require('path');
 
 class Dashboard {
-    constructor(config, resourceManager) {
+    constructor(config, resourceManager, { logInfo, logWarn, logError }) {
         this.config = config;
         this.resourceManager = resourceManager;
         this.server = null;
+        this.logInfo = logInfo;
+        this.logWarn = logWarn;
+        this.logError = logError;
     }
 
     getProxyByApp(appName) {
@@ -21,6 +24,9 @@ class Dashboard {
 
     start() {
         if (!this.config.dashboard?.enabled) {
+            this.logInfo({
+                message: '[Dashboard] 未启用，跳过启动'
+            });
             return;
         }
 
@@ -30,32 +36,56 @@ class Dashboard {
                 const htmlPath = path.join(__dirname, 'dashboard', 'index.html');
                 fs.readFile(htmlPath, 'utf8', (err, content) => {
                     if (err) {
+                        this.logError({
+                            message: '[Dashboard] 页面加载失败',
+                            error: err.message
+                        });
                         res.writeHead(500);
                         res.end('Error loading dashboard');
                         return;
                     }
                     res.writeHead(200, { 'Content-Type': 'text/html' });
                     res.end(content);
+                    this.logInfo({
+                        message: '[Dashboard] 页面访问',
+                        path: '/'
+                    });
                 });
             } else if (req.url === '/api/cache') {
                 // 提供缓存数据API
-                const response = {};
-                this.resourceManager.appCache.keys().forEach(key => {
-                    const appName = this.resourceManager.appCache.get(key);
-                    response[key] = {
-                        value: appName,
-                        ttl: this.resourceManager.appCache.getTtl(key),
-                        proxy: this.getProxyByApp(appName)
-                    };
-                });
+                try {
+                    const response = {};
+                    const keys = this.resourceManager.appCache.keys();
+                    
+                    keys.forEach(key => {
+                        const appName = this.resourceManager.appCache.get(key);
+                        response[key] = {
+                            value: appName,
+                            ttl: this.resourceManager.appCache.getTtl(key),
+                            proxy: this.getProxyByApp(appName)
+                        };
+                    });
 
-                res.writeHead(200, { 
-                    'Content-Type': 'application/json',
-                    'Cache-Control': 'no-cache',
-                    'Access-Control-Allow-Origin': '*'
-                });
-                res.end(JSON.stringify(response));
+                    res.writeHead(200, { 
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-cache',
+                        'Access-Control-Allow-Origin': '*'
+                    });
+                    res.end(JSON.stringify(response));
+                    
+                } catch (error) {
+                    this.logError({
+                        message: '[Dashboard] 缓存数据获取失败',
+                        error: error.message
+                    });
+                    res.writeHead(500);
+                    res.end('Error fetching cache data');
+                }
             } else {
+                this.logWarn({
+                    message: '[Dashboard] 未知路径访问',
+                    path: req.url
+                });
                 res.writeHead(404);
                 res.end('Not found');
             }
@@ -65,7 +95,24 @@ class Dashboard {
         const port = this.config.dashboard.port || 8081;
 
         this.server.listen(port, host, () => {
-            console.log(`Dashboard running at http://${host}:${port}`);
+            this.logInfo({
+                message: '[Dashboard] 服务启动',
+                address: `http://${host}:${port}`
+            });
+        });
+
+        this.server.on('error', (error) => {
+            if (error.code === 'EADDRINUSE') {
+                this.logError({
+                    message: '[Dashboard] 启动失败',
+                    error: `端口 ${port} 已被占用`
+                });
+            } else {
+                this.logError({
+                    message: '[Dashboard] 服务错误',
+                    error: error.message
+                });
+            }
         });
     }
 
@@ -73,6 +120,9 @@ class Dashboard {
         if (this.server) {
             this.server.close();
             this.server = null;
+            this.logInfo({
+                message: '[Dashboard] 服务停止'
+            });
         }
     }
 }

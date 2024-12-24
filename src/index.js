@@ -93,7 +93,11 @@ const proxyServer = new ProxyServer(config, {
 });
 
 // 创建并启动仪表板
-const dashboard = new Dashboard(config, proxyServer.resources);
+const dashboard = new Dashboard(config, proxyServer.resources, {
+    logInfo,
+    logWarn,
+    logError
+});
 dashboard.start();
 
 // 创建代理服务器
