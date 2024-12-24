@@ -174,7 +174,7 @@ server:
 
 # 代理应用程序映射配置
 proxy_app_map:
-  "127.0.0.1:8081":
+  "127.0.0.1:8888":
     - "firefox"
     - "chrome"
 
@@ -199,6 +199,12 @@ logging:
     directory: ${defaultConfigDir}/logs
     max_size: 10m
     max_files: 5
+
+# Dashboard配置
+dashboard:
+  enabled: true
+  port: 8081
+  host: "127.0.0.1"
 `;
 
         fs.writeFileSync(defaultConfigPath, defaultConfig);
