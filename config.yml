@@ -38,3 +38,9 @@ logging:
     directory: logs
     max_size: 10m
     max_files: 5
+
+# Dashboard配置
+dashboard:
+  enabled: true
+  port: 8081
+  host: "127.0.0.1"

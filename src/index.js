@@ -3,6 +3,7 @@ const { loadConfig, createLoggers, watchConfig } = require('./config');
 const ProxyManager = require('./proxyManager');
 const { parseArguments, handleOpenConfig } = require('./cli');
 const ProxyServer = require('./proxyServer');
+const Dashboard = require('./dashboard');
 
 // 解析命令行参数
 const argv = parseArguments();
@@ -91,6 +92,10 @@ const proxyServer = new ProxyServer(config, {
     logError
 });
 
+// 创建并启动仪表板
+const dashboard = new Dashboard(config, proxyServer.resources);
+dashboard.start();
+
 // 创建代理服务器
 const server = proxyServer.createServer();
 
@@ -102,6 +107,7 @@ function setSystemProxy(enable) {
 // 优雅退出处理
 function gracefulShutdown(restart = false) {
     proxyServer.shutdown();
+    dashboard.stop();
     
     logInfo('正在关闭代理服务器...');
     setSystemProxy(false);
