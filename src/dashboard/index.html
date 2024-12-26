@@ -50,17 +50,23 @@
 </head>
 <body class="bg-light">
     <div id="app" v-cloak>
+        <div class="toast-container position-fixed top-0 end-0 p-3">
+            <div id="copyToast" class="toast align-items-center text-white bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        <i class="bi bi-check-circle me-2"></i>复制成功
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+            </div>
+        </div>
+        
         <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
             <div class="container-fluid">
                 <a class="navbar-brand" href="#">
                     <i class="bi bi-diagram-3"></i>
                     App Proxy Dashboard
                 </a>
-                <div class="d-flex">
-                    <button @click="refreshData" class="btn btn-light refresh-btn">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
-                </div>
             </div>
         </nav>
 
@@ -91,13 +97,10 @@
                                 <tr v-for="item in cacheData" :key="item.name">
                                     <td>
                                         {{ item.name }}
-                                        <span class="badge ports-badge" 
-                                              data-bs-toggle="tooltip" 
-                                              data-bs-placement="right"
-                                              :data-tooltip-for="item.name"
-                                              :title="'端口: ' + item.ports.join(', ')">
-                                            {{ item.ports.length }}个端口
-                                        </span>
+                                        <button class="btn btn-sm btn-light me-2" 
+                                                @click="copyAppName(item.name)">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
                                     </td>
                                     <td>
                                         <span :class="['badge', item.proxy === '直连' ? 'bg-secondary' : 'bg-info']">
@@ -105,7 +108,9 @@
                                         </span>
                                     </td>
                                     <td>
-                                        <span class="connection-count">{{ item.connections }}</span>
+                                        <span class="connection-count">
+                                            {{ item.connections }}
+                                        </span>
                                     </td>
                                     <td>
                                         <span :class="['badge', item.status === '活动' ? 'status-active' : 'status-inactive']">
@@ -179,6 +184,15 @@
                     } catch (error) {
                         console.error('Failed to fetch cache data:', error);
                     }
+                },
+                copyAppName(name) {
+                    navigator.clipboard.writeText(name).then(() => {
+                        const toastEl = document.getElementById('copyToast');
+                        const toast = new bootstrap.Toast(toastEl, {
+                            delay: 2000
+                        });
+                        toast.show();
+                    });
                 }
             },
             mounted() {
