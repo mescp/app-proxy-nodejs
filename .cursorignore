@@ -1,0 +1,40 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+node_modules
+.DS_Store
+logs
+
+# Build output directories
+dist/
+build/
+out/
+
+# Cache directories
+.cache/
+.temp/
+
+# IDE specific files
+.idea/
+.vscode/
+*.sublime-*
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage output
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Package manager files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# System files
+Thumbs.db

@@ -4,16 +4,58 @@ const NodeCache = require('node-cache');
 class ResourceManager {
     constructor() {
         this.activeConnections = new Set();
+        this.portConnections = new Map();
         this.isShuttingDown = false;
-        this.appCache = new NodeCache({ stdTTL: 300 });
+        // 用于缓存端口号与应用程序名称的映射关系，避免频繁执行lsof命令
+        this.appCache = new NodeCache({ 
+            stdTTL: 0,        // 永不过期
+            checkperiod: 0,   // 不检查过期项
+            useClones: false  // 不克隆值以提高性能
+        });
     }
 
     addConnection(socket) {
         this.activeConnections.add(socket);
+        
+        const port = socket.remotePort;
+        if (port) {
+            if (!this.portConnections.has(port)) {
+                this.portConnections.set(port, new Set());
+            }
+            this.portConnections.get(port).add(socket);
+        }
     }
 
     removeConnection(socket) {
         this.activeConnections.delete(socket);
+        
+        const port = socket.remotePort;
+        if (port && this.portConnections.has(port)) {
+            const connections = this.portConnections.get(port);
+            connections.delete(socket);
+            
+            if (connections.size === 0) {
+                this.portConnections.delete(port);
+                this.appCache.del(port);
+            }
+        }
+    }
+
+    hasActiveConnections(port) {
+        return this.portConnections.has(port) && this.portConnections.get(port).size > 0;
+    }
+
+    getCachedAppName(port) {
+        if (this.hasActiveConnections(port)) {
+            return this.appCache.get(port);
+        }
+        return null;
+    }
+
+    setCachedAppName(port, appName) {
+        if (this.hasActiveConnections(port)) {
+            this.appCache.set(port, appName);
+        }
     }
 
     closeConnections() {
@@ -29,11 +71,30 @@ class ResourceManager {
     }
 
     cleanup() {
+        this.portConnections.clear();
         this.appCache.close();
     }
 
     get connectionsCount() {
         return this.activeConnections.size;
+    }
+
+    // 获取指定端口的连接统计信息
+    getConnectionStats(port) {
+        if (!this.portConnections.has(port)) {
+            return null;
+        }
+
+        const connections = this.portConnections.get(port);
+        const total = connections.size;
+        const idle = 0; // 目前没有实现空闲连接的统计，默认为0
+        const avgIdleTime = 0; // 目前没有实现空闲时间的统计，默认为0
+
+        return {
+            total,
+            idle,
+            avgIdleTime
+        };
     }
 }
 
@@ -70,11 +131,11 @@ class ProxyServer {
         clientSocket.once('data', (data) => {
             const clientPort = clientSocket.remotePort;
             
-            let appName = this.resources.appCache.get(clientPort);
+            let appName = this.resources.getCachedAppName(clientPort);
             if (!appName) {
                 appName = this.getAppNameByPort(clientPort);
                 if (appName) {
-                    this.resources.appCache.set(clientPort, appName);
+                    this.resources.setCachedAppName(clientPort, appName);
                 }
             }
 
