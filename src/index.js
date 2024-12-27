@@ -110,18 +110,28 @@ function setSystemProxy(enable) {
 
 // 优雅退出处理
 function gracefulShutdown(restart = false) {
-    proxyServer.shutdown();
-    dashboard.stop();
+    if (proxyServer.resources.isShuttingDown) {
+        return;
+    }
     
     logInfo('正在关闭代理服务器...');
+    
+    // 停止系统代理
     setSystemProxy(false);
     
+    // 停止仪表板
+    dashboard.stop();
+    
+    // 关闭服务器，不再接受新连接
     proxyServer.closeServer(() => {
         logInfo('服务器已停止接受新连接');
     });
     
-    logInfo(`正在关闭 ${proxyServer.connectionsCount} 个活动连接...`);
+    // 关闭现有连接
+    proxyServer.shutdown();
+    logInfo(`正在关闭 (代理) ${proxyServer.connectionsCount} 个活动连接...`);
     
+    // 等待一段时间后强制关闭
     setTimeout(() => {
         proxyServer.forceShutdown();
         
