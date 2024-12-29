@@ -1,7 +1,7 @@
 const net = require('net');
 const { loadConfig, createLoggers, watchConfig } = require('./config');
 const ProxyManager = require('./proxyManager');
-const { parseArguments, handleOpenConfig } = require('./cli');
+const { parseArguments, handleOpenConfig, startDaemon, stopProcess } = require('./cli');
 const ProxyServer = require('./proxyServer');
 const Dashboard = require('./dashboard');
 
@@ -12,6 +12,18 @@ const argv = parseArguments();
 if (argv['open-config']) {
     handleOpenConfig();
     process.exit(0);
+}
+
+// 如果指定了停止选项，则停止运行的程序并退出
+if (argv.stop) {
+    stopProcess();
+    return;
+}
+
+// 如果指定了后台运行模式，启动守护进程
+if (argv.daemon) {
+    startDaemon();
+    return;
 }
 
 class ErrorHandler {
