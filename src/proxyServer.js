@@ -12,6 +12,12 @@ class ResourceManager {
             checkperiod: 0,   // 不检查过期项
             useClones: false  // 不克隆值以提高性能
         });
+        // 用于缓存应用程序与其访问的远端目标的映射关系
+        this.appTargetCache = new NodeCache({
+            stdTTL: 300,      // 5分钟后过期
+            checkperiod: 60,  // 每分钟检查过期项
+            useClones: false  // 不克隆值以提高性能
+        });
     }
 
     addConnection(socket) {
@@ -73,6 +79,7 @@ class ResourceManager {
     cleanup() {
         this.portConnections.clear();
         this.appCache.close();
+        this.appTargetCache.close();
     }
 
     get connectionsCount() {
@@ -95,6 +102,38 @@ class ResourceManager {
             idle,
             avgIdleTime
         };
+    }
+
+    // 记录应用访问的远端目标
+    recordAppTarget(appName, target) {
+        if (!appName || !target) return;
+        
+        let targets = this.appTargetCache.get(appName) || new Set();
+        targets.add(JSON.stringify(target)); // 将目标对象转换为字符串以便于Set去重
+        this.appTargetCache.set(appName, targets);
+    }
+
+    // 获取应用访问的所有远端目标
+    getAppTargets(appName) {
+        if (!appName) return [];
+        const targets = this.appTargetCache.get(appName);
+        if (!targets) return [];
+        return Array.from(targets).map(t => JSON.parse(t)).reverse();
+    }
+
+    // 获取所有应用的目标映射
+    getAllAppTargets() {
+        const result = new Map();
+        const apps = this.appCache.keys();
+        
+        for (const appName of apps) {
+            const targets = this.getAppTargets(appName);
+            if (targets.length > 0) {
+                result.set(appName, targets);
+            }
+        }
+        
+        return result;
     }
 }
 
@@ -198,6 +237,16 @@ class ProxyServer {
             mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
         });
 
+        // 记录目标信息
+        if (appName) {
+            this.resources.recordAppTarget(appName, {
+                host,
+                port: parseInt(port),
+                type: 'direct',
+                protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
+            });
+        }
+
         const directSocket = new net.Socket();
         directSocket.connect(parseInt(port), host, () => {
             this.logInfo({
@@ -238,14 +287,61 @@ class ProxyServer {
         });
     }
 
+    // 从HTTP请求数据中解析目标地址
+    parseTargetFromData(data) {
+        const firstLine = data.toString().split('\n')[0];
+        let host, port;
+
+        if (firstLine.startsWith('CONNECT')) {
+            // HTTPS请求
+            const match = firstLine.match(/^CONNECT\s+([^:\s]+):(\d+)/i);
+            if (match) {
+                [, host, port] = match;
+                return {
+                    host,
+                    port: parseInt(port),
+                    protocol: 'HTTPS'
+                };
+            }
+        } else {
+            // HTTP请求
+            const match = firstLine.match(/^[A-Z]+\s+(?:https?:\/\/)?([^:\/\s]+):?(\d+)?/i);
+            if (match) {
+                [, host, port] = match;
+                port = port || '80';
+                return {
+                    host,
+                    port: parseInt(port),
+                    protocol: 'HTTP'
+                };
+            }
+        }
+        return null;
+    }
+
     handleProxyConnection(clientSocket, data, targetProxy, appName) {
         const proxySocket = new net.Socket();
+        
+        // 解析实际的目标地址
+        const targetInfo = this.parseTargetFromData(data);
         
         this.logInfo({
             event: '代理模式',
             app: appName || '未知应用',
-            proxy: `${targetProxy.host}:${targetProxy.port}`
+            proxy: `${targetProxy.host}:${targetProxy.port}`,
+            target: targetInfo ? `${targetInfo.host}:${targetInfo.port}` : '未知目标'
         });
+
+        // 记录目标信息
+        if (appName && targetInfo) {
+            this.resources.recordAppTarget(appName, {
+                host: targetInfo.host,
+                port: targetInfo.port,
+                type: 'proxy',
+                protocol: targetInfo.protocol,
+                via: `${targetProxy.host}:${targetProxy.port}` // 添加代理服务器信息
+            });
+        }
 
         proxySocket.connect(targetProxy.port, targetProxy.host, () => {
             this.logInfo({

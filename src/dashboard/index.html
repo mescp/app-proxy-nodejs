@@ -22,12 +22,6 @@
         .refresh-btn:hover {
             transform: rotate(180deg);
         }
-        .status-active {
-            background-color: #28a745 !important;
-        }
-        .status-inactive {
-            background-color: #dc3545 !important;
-        }
         .ports-badge {
             font-size: 0.75em;
             background-color: #6c757d;
@@ -36,6 +30,15 @@
         }
         .connection-count {
             font-weight: bold;
+            color: #0d6efd;
+        }
+        .badge.bg-light {
+            border: 1px solid #dee2e6;
+        }
+        .btn-link {
+            color: #6c757d;
+        }
+        .btn-link:hover {
             color: #0d6efd;
         }
         @font-face {
@@ -90,7 +93,7 @@
                                     <th>应用名称</th>
                                     <th>目标代理</th>
                                     <th>连接数</th>
-                                    <th>状态</th>
+                                    <th>目标地址(5分钟内访问的历史数据)</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -113,9 +116,45 @@
                                         </span>
                                     </td>
                                     <td>
-                                        <span :class="['badge', item.status === '活动' ? 'status-active' : 'status-inactive']">
-                                            {{ item.status }}
-                                        </span>
+                                        <div v-if="item.targets.length <= 5">
+                                            <div v-for="target in item.targets" :key="target.host + target.port" class="mb-1">
+                                                <span class="badge bg-light text-dark">
+                                                    {{ target.protocol }}
+                                                </span>
+                                                <span class="ms-1">
+                                                    {{ target.host }}:{{ target.port }}
+                                                </span>
+                                                <span v-if="target.via" class="badge bg-secondary ms-1" title="代理服务器">
+                                                    via {{ target.via }}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div v-else>
+                                            <div v-for="target in (item.showAllTargets ? item.targets : item.targets.slice(0, 5))" 
+                                                 :key="target.host + target.port" 
+                                                 class="mb-1">
+                                                <span class="badge bg-light text-dark">
+                                                    {{ target.protocol }}
+                                                </span>
+                                                <span class="ms-1">
+                                                    {{ target.host }}:{{ target.port }}
+                                                </span>
+                                                <span v-if="target.via" class="badge bg-secondary ms-1" title="代理服务器">
+                                                    via {{ target.via }}
+                                                </span>
+                                            </div>
+                                            <button @click="toggleTargets(item)" 
+                                                    class="btn btn-link btn-sm text-decoration-none p-0 mt-1">
+                                                <span v-if="!item.showAllTargets">
+                                                    <i class="bi bi-chevron-down"></i>
+                                                    显示全部 ({{ item.targets.length }})
+                                                </span>
+                                                <span v-else>
+                                                    <i class="bi bi-chevron-up"></i>
+                                                    收起
+                                                </span>
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             </tbody>
@@ -148,6 +187,13 @@
                 }
             },
             methods: {
+                toggleTargets(item) {
+                    if (!item.hasOwnProperty('showAllTargets')) {
+                        item.showAllTargets = true;
+                    } else {
+                        item.showAllTargets = !item.showAllTargets;
+                    }
+                },
                 destroyTooltips() {
                     this.activeTooltipElement = document.querySelector('.tooltip');
                     if (this.activeTooltipElement) {
@@ -175,6 +221,13 @@
                             throw new Error(`HTTP error! status: ${response.status}`);
                         }
                         const data = await response.json();
+                        // 保持展开状态
+                        data.forEach(newItem => {
+                            const existingItem = this.cacheData.find(item => item.name === newItem.name);
+                            if (existingItem && existingItem.showAllTargets) {
+                                newItem.showAllTargets = true;
+                            }
+                        });
                         this.cacheData = data;
                         
                         this.$nextTick(() => {

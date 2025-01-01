@@ -73,7 +73,8 @@ class Dashboard {
                     totalConnections: 0,
                     idleConnections: 0,
                     totalIdleTime: 0,
-                    proxy: this.getProxyByApp(appName)
+                    proxy: this.getProxyByApp(appName),
+                    targets: this.resourceManager.getAppTargets(appName) // 获取应用访问的目标信息
                 });
             }
 
@@ -99,7 +100,8 @@ class Dashboard {
             avgIdleTime: stats.idleConnections > 0 
                 ? Math.round(stats.totalIdleTime / stats.idleConnections / 1000) 
                 : 0, // 转换为秒
-            activeConnections: stats.totalConnections - stats.idleConnections
+            activeConnections: stats.totalConnections - stats.idleConnections,
+            targets: stats.targets || [] // 包含目标信息在API响应中
         }));
     }
 
