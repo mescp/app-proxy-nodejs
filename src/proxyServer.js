@@ -108,7 +108,7 @@ class ProxyServer {
                 port: parseInt(port),
                 type: 'direct',
                 protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
-            });
+            }, false);
         }
 
         const directSocket = new net.Socket();
@@ -119,6 +119,16 @@ class ProxyServer {
                 target: `${host}:${port}`,
                 mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
             });
+
+            // 连接成功后更新记录
+            if (appName) {
+                this.resources.recordAppTarget(appName, {
+                    host,
+                    port: parseInt(port),
+                    type: 'direct',
+                    protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
+                }, true);
+            }
 
             if (firstLine.startsWith('CONNECT')) {
                 clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
@@ -146,6 +156,17 @@ class ProxyServer {
                 app: appName || '未知应用',
                 target: `${host}:${port}`
             }, err);
+
+            // 连接错误时记录失败状态
+            if (appName) {
+                this.resources.recordAppTarget(appName, {
+                    host,
+                    port: parseInt(port),
+                    type: 'direct',
+                    protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
+                }, false);
+            }
+
             this.resources.removeConnection(directSocket);
             clientSocket.destroy();
         });
@@ -204,7 +225,7 @@ class ProxyServer {
                 type: 'proxy',
                 protocol: targetInfo.protocol,
                 via: `${targetProxy.host}:${targetProxy.port}` // 添加代理服务器信息
-            });
+            }, false);
         }
 
         proxySocket.connect(targetProxy.port, targetProxy.host, () => {
@@ -213,6 +234,17 @@ class ProxyServer {
                 app: appName || '未知应用',
                 proxy: `${targetProxy.host}:${targetProxy.port}`
             });
+
+            // 连接成功后更新记录
+            if (appName && targetInfo) {
+                this.resources.recordAppTarget(appName, {
+                    host: targetInfo.host,
+                    port: targetInfo.port,
+                    type: 'proxy',
+                    protocol: targetInfo.protocol,
+                    via: `${targetProxy.host}:${targetProxy.port}`
+                }, true);
+            }
 
             proxySocket.write(data);
             clientSocket.pipe(proxySocket);
@@ -236,6 +268,18 @@ class ProxyServer {
                 app: appName || '未知应用',
                 proxy: `${targetProxy.host}:${targetProxy.port}`
             }, err);
+
+            // 连接错误时记录失败状态
+            if (appName && targetInfo) {
+                this.resources.recordAppTarget(appName, {
+                    host: targetInfo.host,
+                    port: targetInfo.port,
+                    type: 'proxy',
+                    protocol: targetInfo.protocol,
+                    via: `${targetProxy.host}:${targetProxy.port}`
+                }, false);
+            }
+
             this.resources.removeConnection(proxySocket);
             clientSocket.destroy();
         });

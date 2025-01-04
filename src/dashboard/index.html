@@ -93,7 +93,7 @@
                                     <th>应用名称</th>
                                     <th>目标代理</th>
                                     <th>连接数</th>
-                                    <th>目标地址(5分钟内访问的历史数据)</th>
+                                    <th>目标地址(30分钟内访问的历史数据)</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -117,30 +117,38 @@
                                     </td>
                                     <td>
                                         <div v-if="item.targets.length <= 5">
-                                            <div v-for="target in item.targets" :key="target.host + target.port" class="mb-1">
+                                            <div v-for="target in item.targets" 
+                                                 :key="`${target.target.host}:${target.target.port}-${target.timestamp}`" 
+                                                 class="mb-1">
                                                 <span class="badge bg-light text-dark">
-                                                    {{ target.protocol }}
+                                                    {{ target.target.protocol }}
                                                 </span>
                                                 <span class="ms-1">
-                                                    {{ target.host }}:{{ target.port }}
+                                                    {{ target.target.host }}:{{ target.target.port }}
                                                 </span>
-                                                <span v-if="target.via" class="badge bg-secondary ms-1" title="代理服务器">
-                                                    via {{ target.via }}
+                                                <span v-if="target.target.via" class="badge bg-secondary ms-1" title="代理服务器">
+                                                    via {{ target.target.via }}
+                                                </span>
+                                                <span :class="['badge ms-1', target.success ? 'bg-success' : 'bg-danger']">
+                                                    {{ target.success ? '成功' : '失败' }}
                                                 </span>
                                             </div>
                                         </div>
                                         <div v-else>
                                             <div v-for="target in (item.showAllTargets ? item.targets : item.targets.slice(0, 5))" 
-                                                 :key="target.host + target.port" 
+                                                 :key="`${target.target.host}:${target.target.port}-${target.timestamp}`" 
                                                  class="mb-1">
                                                 <span class="badge bg-light text-dark">
-                                                    {{ target.protocol }}
+                                                    {{ target.target.protocol }}
                                                 </span>
                                                 <span class="ms-1">
-                                                    {{ target.host }}:{{ target.port }}
+                                                    {{ target.target.host }}:{{ target.target.port }}
                                                 </span>
-                                                <span v-if="target.via" class="badge bg-secondary ms-1" title="代理服务器">
-                                                    via {{ target.via }}
+                                                <span v-if="target.target.via" class="badge bg-secondary ms-1" title="代理服务器">
+                                                    via {{ target.target.via }}
+                                                </span>
+                                                <span :class="['badge ms-1', target.success ? 'bg-success' : 'bg-danger']">
+                                                    {{ target.success ? '成功' : '失败' }}
                                                 </span>
                                             </div>
                                             <button @click="toggleTargets(item)" 

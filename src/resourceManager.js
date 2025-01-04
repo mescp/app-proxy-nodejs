@@ -14,7 +14,7 @@ class ResourceManager {
         });
         // 用于缓存应用程序与其访问的远端目标的映射关系
         this.appTargetCache = new NodeCache({
-            stdTTL: 300,      // 5分钟后过期
+            stdTTL: 60*30,      // 5分钟后过期
             checkperiod: 60,  // 每分钟检查过期项
             useClones: false  // 不克隆值以提高性能
         });
@@ -105,11 +105,25 @@ class ResourceManager {
     }
 
     // 记录应用访问的远端目标
-    recordAppTarget(appName, target) {
+    recordAppTarget(appName, target, success = true) {
         if (!appName || !target) return;
         
         let targets = this.appTargetCache.get(appName) || new Set();
-        targets.add(JSON.stringify(target)); // 将目标对象转换为字符串以便于Set去重
+        const targetKey = JSON.stringify(target); // 用于排重的键
+        
+        // 移除相同目标的旧记录
+        const existingTargets = Array.from(targets).map(t => JSON.parse(t));
+        targets = new Set(existingTargets
+            .filter(t => JSON.stringify(t.target) !== targetKey)
+            .map(t => JSON.stringify(t)));
+        
+        // 添加新记录
+        const targetWithStatus = {
+            target,
+            success,
+            timestamp: Date.now()
+        };
+        targets.add(JSON.stringify(targetWithStatus));
         this.appTargetCache.set(appName, targets);
     }
 
@@ -118,7 +132,9 @@ class ResourceManager {
         if (!appName) return [];
         const targets = this.appTargetCache.get(appName);
         if (!targets) return [];
-        return Array.from(targets).map(t => JSON.parse(t)).reverse();
+        return Array.from(targets)
+            .map(t => JSON.parse(t))
+            .sort((a, b) => b.timestamp - a.timestamp); // 按时间戳降序排序
     }
 
     // 获取所有应用的目标映射
