@@ -101,8 +101,8 @@ class ProxyServer {
             mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
         });
 
-        // 记录目标信息
-        if (appName) {
+        // 仅在 dashboard 启用时记录目标信息
+        if (this.config?.dashboard?.enabled && appName) {
             this.resources.recordAppTarget(appName, {
                 host,
                 port: parseInt(port),
@@ -120,8 +120,8 @@ class ProxyServer {
                 mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
             });
 
-            // 连接成功后更新记录
-            if (appName) {
+            // 仅在 dashboard 启用时更新记录
+            if (this.config?.dashboard?.enabled && appName) {
                 this.resources.recordAppTarget(appName, {
                     host,
                     port: parseInt(port),
@@ -157,8 +157,8 @@ class ProxyServer {
                 target: `${host}:${port}`
             }, err);
 
-            // 连接错误时记录失败状态
-            if (appName) {
+            // 仅在 dashboard 启用时记录失败状态
+            if (this.config?.dashboard?.enabled && appName) {
                 this.resources.recordAppTarget(appName, {
                     host,
                     port: parseInt(port),
@@ -217,14 +217,14 @@ class ProxyServer {
             target: targetInfo ? `${targetInfo.host}:${targetInfo.port}` : '未知目标'
         });
 
-        // 记录目标信息
-        if (appName && targetInfo) {
+        // 仅在 dashboard 启用时记录目标信息
+        if (this.config?.dashboard?.enabled && appName && targetInfo) {
             this.resources.recordAppTarget(appName, {
                 host: targetInfo.host,
                 port: targetInfo.port,
                 type: 'proxy',
                 protocol: targetInfo.protocol,
-                via: `${targetProxy.host}:${targetProxy.port}` // 添加代理服务器信息
+                via: `${targetProxy.host}:${targetProxy.port}`
             }, false);
         }
 
@@ -235,8 +235,8 @@ class ProxyServer {
                 proxy: `${targetProxy.host}:${targetProxy.port}`
             });
 
-            // 连接成功后更新记录
-            if (appName && targetInfo) {
+            // 仅在 dashboard 启用时更新记录
+            if (this.config?.dashboard?.enabled && appName && targetInfo) {
                 this.resources.recordAppTarget(appName, {
                     host: targetInfo.host,
                     port: targetInfo.port,
@@ -269,8 +269,8 @@ class ProxyServer {
                 proxy: `${targetProxy.host}:${targetProxy.port}`
             }, err);
 
-            // 连接错误时记录失败状态
-            if (appName && targetInfo) {
+            // 仅在 dashboard 启用时记录失败状态
+            if (this.config?.dashboard?.enabled && appName && targetInfo) {
                 this.resources.recordAppTarget(appName, {
                     host: targetInfo.host,
                     port: targetInfo.port,
