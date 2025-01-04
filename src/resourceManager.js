@@ -41,8 +41,26 @@ class ResourceManager {
             connections.delete(socket);
             
             if (connections.size === 0) {
+                // 获取应用名称
+                const appName = this.appCache.get(port);
+                
+                // 清理端口连接记录
                 this.portConnections.delete(port);
+                
+                // 清理应用名称缓存
                 this.appCache.del(port);
+                
+                // 如果这是应用的最后一个连接，清理目标记录
+                if (appName) {
+                    const hasOtherConnections = Array.from(this.portConnections.keys()).some(p => {
+                        const otherAppName = this.appCache.get(p);
+                        return otherAppName === appName;
+                    });
+                    
+                    if (!hasOtherConnections) {
+                        this.appTargetCache.del(appName);
+                    }
+                }
             }
         }
     }
