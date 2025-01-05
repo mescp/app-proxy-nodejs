@@ -243,25 +243,32 @@ class ResourceManager {
     }
 
     // 记录应用访问的远端目标
-    recordAppTarget(appName, target, success = true) {
+    recordAppTarget(appName, target, status = 'connecting') {
         if (!appName || !target) return;
         
         let targets = this.appTargetCache.get(appName) || new Set();
         const targetKey = JSON.stringify(target); // 用于排重的键
         
-        // 移除相同目标的旧记录
-        const existingTargets = Array.from(targets).map(t => JSON.parse(t));
-        targets = new Set(existingTargets
-            .filter(t => JSON.stringify(t.target) !== targetKey)
-            .map(t => JSON.stringify(t)));
+        // 验证状态值是否有效
+        if (!['connecting', 'success', 'failed'].includes(status)) {
+            status = 'connecting';
+        }
         
-        // 添加新记录
-        const targetWithStatus = {
+        // 更新或添加目标记录
+        for (const existingTarget of targets) {
+            const parsed = JSON.parse(existingTarget);
+            if (JSON.stringify(parsed.target) === targetKey) {
+                targets.delete(existingTarget);
+                break;
+            }
+        }
+        
+        targets.add(JSON.stringify({
             target,
-            success,
+            status,
             timestamp: Date.now()
-        };
-        targets.add(JSON.stringify(targetWithStatus));
+        }));
+        
         this.appTargetCache.set(appName, targets);
     }
 

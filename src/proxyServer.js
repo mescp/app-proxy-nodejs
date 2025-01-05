@@ -108,7 +108,7 @@ class ProxyServer {
                 port: parseInt(port),
                 type: 'direct',
                 protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
-            }, false);
+            }, 'connecting');
         }
 
         const directSocket = new net.Socket();
@@ -127,7 +127,7 @@ class ProxyServer {
                     port: parseInt(port),
                     type: 'direct',
                     protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
-                }, true);
+                }, 'success');
             }
 
             if (firstLine.startsWith('CONNECT')) {
@@ -164,7 +164,7 @@ class ProxyServer {
                     port: parseInt(port),
                     type: 'direct',
                     protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
-                }, false);
+                }, 'failed');
             }
 
             this.resources.removeConnection(directSocket);
@@ -225,7 +225,7 @@ class ProxyServer {
                 type: 'proxy',
                 protocol: targetInfo.protocol,
                 via: `${targetProxy.host}:${targetProxy.port}`
-            }, false);
+            }, 'connecting');
         }
 
         proxySocket.connect(targetProxy.port, targetProxy.host, () => {
@@ -243,7 +243,7 @@ class ProxyServer {
                     type: 'proxy',
                     protocol: targetInfo.protocol,
                     via: `${targetProxy.host}:${targetProxy.port}`
-                }, true);
+                }, 'success');
             }
 
             proxySocket.write(data);
@@ -277,7 +277,7 @@ class ProxyServer {
                     type: 'proxy',
                     protocol: targetInfo.protocol,
                     via: `${targetProxy.host}:${targetProxy.port}`
-                }, false);
+                }, 'failed');
             }
 
             this.resources.removeConnection(proxySocket);

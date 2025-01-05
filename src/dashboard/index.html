@@ -129,8 +129,16 @@
                                                 <span v-if="target.target.via" class="badge bg-secondary ms-1" title="代理服务器">
                                                     via {{ target.target.via }}
                                                 </span>
-                                                <span :class="['badge ms-1', target.success ? 'bg-success' : 'bg-danger']">
-                                                    {{ target.success ? '成功' : '失败' }}
+                                                <span :class="['badge ms-1', {
+                                                    'bg-warning text-dark': target.status === 'connecting',
+                                                    'bg-success': target.status === 'success',
+                                                    'bg-danger': target.status === 'failed'
+                                                }]">
+                                                    {{ {
+                                                        'connecting': '连接中',
+                                                        'success': '成功',
+                                                        'failed': '失败'
+                                                    }[target.status] }}
                                                 </span>
                                             </div>
                                         </div>
@@ -147,8 +155,16 @@
                                                 <span v-if="target.target.via" class="badge bg-secondary ms-1" title="代理服务器">
                                                     via {{ target.target.via }}
                                                 </span>
-                                                <span :class="['badge ms-1', target.success ? 'bg-success' : 'bg-danger']">
-                                                    {{ target.success ? '成功' : '失败' }}
+                                                <span :class="['badge ms-1', {
+                                                    'bg-warning text-dark': target.status === 'connecting',
+                                                    'bg-success': target.status === 'success',
+                                                    'bg-danger': target.status === 'failed'
+                                                }]">
+                                                    {{ {
+                                                        'connecting': '连接中',
+                                                        'success': '成功',
+                                                        'failed': '失败'
+                                                    }[target.status] }}
                                                 </span>
                                             </div>
                                             <button @click="toggleTargets(item)" 
