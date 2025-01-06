@@ -17,6 +17,26 @@ class ProxyServer {
         return this.proxyManager.getAppNameByPort(port);
     }
 
+    // 根据域名获取代理
+    getProxyByDomain(host) {
+        if (!this.config.proxy_domain_map) {
+            return null;
+        }
+
+        for (const [proxyAddr, domains] of Object.entries(this.config.proxy_domain_map)) {
+            if (domains.some(domain => {
+                // 支持通配符匹配，如 *.google.com
+                const pattern = domain.replace(/\./g, '\\.').replace(/\*/g, '.*');
+                const regex = new RegExp(`^${pattern}$`, 'i');
+                return regex.test(host);
+            })) {
+                const [host, port] = proxyAddr.split(':');
+                return { host, port: parseInt(port) };
+            }
+        }
+        return null;
+    }
+
     // 根据应用名称获取代理
     getProxyByApp(appName) {
         for (const [proxyAddr, apps] of Object.entries(this.config.proxy_app_map)) {
@@ -34,7 +54,13 @@ class ProxyServer {
         clientSocket.once('data', (data) => {
             const clientPort = clientSocket.remotePort;
             
-            let appName = this.resources.getCachedAppName(clientPort);
+            // 解析目标地址
+            const targetInfo = this.parseTargetFromData(data);
+            let targetProxy = null;
+            let appName = null;
+
+            // 获取应用名称
+            appName = this.resources.getCachedAppName(clientPort);
             if (!appName) {
                 appName = this.getAppNameByPort(clientPort);
                 if (appName) {
@@ -42,20 +68,31 @@ class ProxyServer {
                 }
             }
 
-            const targetProxy = appName ? this.getProxyByApp(appName) : null;
+            // 优先使用域名规则
+            if (targetInfo && targetInfo.host) {
+                targetProxy = this.getProxyByDomain(targetInfo.host);
+            }
+
+            // 如果没有匹配的域名规则，尝试使用应用名规则
+            if (!targetProxy && appName) {
+                targetProxy = this.getProxyByApp(appName);
+            }
 
             if (!targetProxy) {
-                this.handleDirectConnection(clientSocket, data, appName);
+                this.handleDirectConnection(clientSocket, data, targetInfo?.host, appName);
                 return;
             }
 
-            this.handleProxyConnection(clientSocket, data, targetProxy, appName);
+            this.handleProxyConnection(clientSocket, data, targetProxy, targetInfo?.host, appName);
         });
 
         clientSocket.on('close', () => {
             this.resources.removeConnection(clientSocket);
         });
 
+        // 移除所有现有的错误监听器
+        clientSocket.removeAllListeners('error');
+        
         clientSocket.on('error', (err) => {
             this.logWarn({
                 event: '客户端连接错误'
@@ -64,7 +101,7 @@ class ProxyServer {
         });
     }
 
-    handleDirectConnection(clientSocket, data, appName) {
+    handleDirectConnection(clientSocket, data, targetHost, appName) {
         const firstLine = data.toString().split('\n')[0];
         let host, port;
 
@@ -82,10 +119,11 @@ class ProxyServer {
         }
 
         if (host && port) {
-            this.createDirectConnection(clientSocket, host, port, firstLine, appName, data);
+            this.createDirectConnection(clientSocket, host, port, firstLine, targetHost, appName, data);
         } else {
             this.logWarn({
                 event: '解析失败',
+                target: targetHost || '未知目标',
                 app: appName || '未知应用',
                 data: firstLine
             });
@@ -93,41 +131,51 @@ class ProxyServer {
         }
     }
 
-    createDirectConnection(clientSocket, host, port, firstLine, appName, data) {
+    createDirectConnection(clientSocket, host, port, firstLine, targetHost, appName, data) {
         this.logInfo({
             event: '透明代理',
+            target: targetHost || '未知目标',
             app: appName || '未知应用',
-            target: `${host}:${port}`,
+            destination: `${host}:${port}`,
             mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
         });
 
+        // 记录目标信息到应用名和域名
+        const targetData = {
+            host,
+            port: parseInt(port),
+            type: 'direct',
+            protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
+        };
+
         // 仅在 dashboard 启用时记录目标信息
-        if (this.config?.dashboard?.enabled && appName) {
-            this.resources.recordAppTarget(appName, {
-                host,
-                port: parseInt(port),
-                type: 'direct',
-                protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
-            }, 'connecting');
+        if (this.config?.dashboard?.enabled) {
+            if (appName) {
+                this.resources.recordAppTarget(appName, targetData, 'connecting');
+            }
+            if (targetHost) {
+                this.resources.recordAppTarget(targetHost, targetData, 'connecting');
+            }
         }
 
         const directSocket = new net.Socket();
         directSocket.connect(parseInt(port), host, () => {
             this.logInfo({
                 event: '直连成功',
+                target: targetHost || '未知目标',
                 app: appName || '未知应用',
-                target: `${host}:${port}`,
+                destination: `${host}:${port}`,
                 mode: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
             });
 
             // 仅在 dashboard 启用时更新记录
-            if (this.config?.dashboard?.enabled && appName) {
-                this.resources.recordAppTarget(appName, {
-                    host,
-                    port: parseInt(port),
-                    type: 'direct',
-                    protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
-                }, 'success');
+            if (this.config?.dashboard?.enabled) {
+                if (appName) {
+                    this.resources.recordAppTarget(appName, targetData, 'success');
+                }
+                if (targetHost) {
+                    this.resources.recordAppTarget(targetHost, targetData, 'success');
+                }
             }
 
             if (firstLine.startsWith('CONNECT')) {
@@ -143,28 +191,33 @@ class ProxyServer {
             directSocket.on('close', () => {
                 this.logInfo({
                     event: '直连关闭',
+                    target: targetHost || '未知目标',
                     app: appName || '未知应用',
-                    target: `${host}:${port}`
+                    destination: `${host}:${port}`
                 });
                 this.resources.removeConnection(directSocket);
             });
         });
 
+        // 移除所有现有的错误监听器
+        directSocket.removeAllListeners('error');
+
         directSocket.on('error', (err) => {
             this.logWarn({
                 event: '直连错误',
+                target: targetHost || '未知目标',
                 app: appName || '未知应用',
-                target: `${host}:${port}`
+                destination: `${host}:${port}`
             }, err);
 
             // 仅在 dashboard 启用时记录失败状态
-            if (this.config?.dashboard?.enabled && appName) {
-                this.resources.recordAppTarget(appName, {
-                    host,
-                    port: parseInt(port),
-                    type: 'direct',
-                    protocol: firstLine.startsWith('CONNECT') ? 'HTTPS' : 'HTTP'
-                }, 'failed');
+            if (this.config?.dashboard?.enabled) {
+                if (appName) {
+                    this.resources.recordAppTarget(appName, targetData, 'failed');
+                }
+                if (targetHost) {
+                    this.resources.recordAppTarget(targetHost, targetData, 'failed');
+                }
             }
 
             this.resources.removeConnection(directSocket);
@@ -204,7 +257,7 @@ class ProxyServer {
         return null;
     }
 
-    handleProxyConnection(clientSocket, data, targetProxy, appName) {
+    handleProxyConnection(clientSocket, data, targetProxy, targetHost, appName) {
         const proxySocket = new net.Socket();
         
         // 解析实际的目标地址
@@ -212,38 +265,48 @@ class ProxyServer {
         
         this.logInfo({
             event: '代理模式',
+            target: targetHost || '未知目标',
             app: appName || '未知应用',
             proxy: `${targetProxy.host}:${targetProxy.port}`,
-            target: targetInfo ? `${targetInfo.host}:${targetInfo.port}` : '未知目标'
+            destination: targetInfo ? `${targetInfo.host}:${targetInfo.port}` : '未知目标'
         });
 
+        // 准备目标信息
+        const targetData = targetInfo ? {
+            host: targetInfo.host,
+            port: targetInfo.port,
+            type: 'proxy',
+            protocol: targetInfo.protocol,
+            via: `${targetProxy.host}:${targetProxy.port}`
+        } : null;
+
         // 仅在 dashboard 启用时记录目标信息
-        if (this.config?.dashboard?.enabled && appName && targetInfo) {
-            this.resources.recordAppTarget(appName, {
-                host: targetInfo.host,
-                port: targetInfo.port,
-                type: 'proxy',
-                protocol: targetInfo.protocol,
-                via: `${targetProxy.host}:${targetProxy.port}`
-            }, 'connecting');
+        if (this.config?.dashboard?.enabled && targetData) {
+            if (appName) {
+                this.resources.recordAppTarget(appName, targetData, 'connecting');
+            }
+            if (targetHost) {
+                this.resources.recordAppTarget(targetHost, targetData, 'connecting');
+            }
         }
 
         proxySocket.connect(targetProxy.port, targetProxy.host, () => {
             this.logInfo({
                 event: '代理连接成功',
+                target: targetHost || '未知目标',
                 app: appName || '未知应用',
-                proxy: `${targetProxy.host}:${targetProxy.port}`
+                proxy: `${targetProxy.host}:${targetProxy.port}`,
+                destination: targetInfo ? `${targetInfo.host}:${targetInfo.port}` : '未知目标'
             });
 
             // 仅在 dashboard 启用时更新记录
-            if (this.config?.dashboard?.enabled && appName && targetInfo) {
-                this.resources.recordAppTarget(appName, {
-                    host: targetInfo.host,
-                    port: targetInfo.port,
-                    type: 'proxy',
-                    protocol: targetInfo.protocol,
-                    via: `${targetProxy.host}:${targetProxy.port}`
-                }, 'success');
+            if (this.config?.dashboard?.enabled && targetData) {
+                if (appName) {
+                    this.resources.recordAppTarget(appName, targetData, 'success');
+                }
+                if (targetHost) {
+                    this.resources.recordAppTarget(targetHost, targetData, 'success');
+                }
             }
 
             proxySocket.write(data);
@@ -255,6 +318,7 @@ class ProxyServer {
             proxySocket.on('close', () => {
                 this.logInfo({
                     event: '代理连接关闭',
+                    target: targetHost || '未知目标',
                     app: appName || '未知应用',
                     proxy: `${targetProxy.host}:${targetProxy.port}`
                 });
@@ -262,22 +326,25 @@ class ProxyServer {
             });
         });
 
+        // 移除所有现有的错误监听器
+        proxySocket.removeAllListeners('error');
+
         proxySocket.on('error', (err) => {
             this.logWarn({
                 event: '代理连接错误',
+                target: targetHost || '未知目标',
                 app: appName || '未知应用',
                 proxy: `${targetProxy.host}:${targetProxy.port}`
             }, err);
 
             // 仅在 dashboard 启用时记录失败状态
-            if (this.config?.dashboard?.enabled && appName && targetInfo) {
-                this.resources.recordAppTarget(appName, {
-                    host: targetInfo.host,
-                    port: targetInfo.port,
-                    type: 'proxy',
-                    protocol: targetInfo.protocol,
-                    via: `${targetProxy.host}:${targetProxy.port}`
-                }, 'failed');
+            if (this.config?.dashboard?.enabled && targetData) {
+                if (appName) {
+                    this.resources.recordAppTarget(appName, targetData, 'failed');
+                }
+                if (targetHost) {
+                    this.resources.recordAppTarget(targetHost, targetData, 'failed');
+                }
             }
 
             this.resources.removeConnection(proxySocket);

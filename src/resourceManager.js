@@ -78,6 +78,9 @@ class ResourceManager {
                         socket.destroy();
                     });
                     
+                    // 移除所有现有的错误监听器
+                    socket.removeAllListeners('error');
+                    
                     // 监听错误事件
                     socket.once('error', (err) => {
                         this.removeConnection(socket);

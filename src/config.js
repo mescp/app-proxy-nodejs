@@ -165,18 +165,26 @@ function loadConfig() {
         const defaultConfig = `
 # 服务器配置
 server:
-  host: "0.0.0.0"    # 监听所有网卡
+  host: "127.0.0.1"    # 监听所有网卡
   port: 8080         # 监听端口
   backlog: 1024      # TCP 连接队列大小
   excluded_services: # 不设置代理的网络服务
     - "Thunderbolt Bridge"
     - "Thunderbolt Bridge status"
 
+# 代理域名映射配置
+proxy_domain_map:
+  "10.20.30.1:8888":
+    - "*.google.com"
+
 # 代理应用程序映射配置
 proxy_app_map:
-  "127.0.0.1:8888":
+  "10.20.30.1:8888":
+    - "code helper (plugin)"
+    - "com.docker.backend"
+
+  "127.0.0.1:8081":
     - "firefox"
-    - "chrome"
 
 # 日志配置
 logging:
@@ -188,15 +196,15 @@ logging:
       enabled: true
       level: error
       filename: error.log
-    warning_log:
-      enabled: true
+    warning_log: 
+      enabled: false
       level: warn
       filename: warning.log
     combined_log:
       enabled: false
       level: info
       filename: combined.log
-    directory: ${defaultConfigDir}/logs
+    directory: logs
     max_size: 10m
     max_files: 5
 

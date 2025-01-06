@@ -7,10 +7,15 @@ server:
     - "Thunderbolt Bridge"
     - "Thunderbolt Bridge status"
 
+# 代理域名映射配置
+proxy_domain_map:
+  "10.20.30.1:8888":
+    - "*.google.com"
+
 # 代理应用程序映射配置
 proxy_app_map:
   "10.20.30.1:8888":
-    - "com.apple.webkit.networking"
+    # - "com.apple.webkit.networking"
     - "code helper (plugin)"
     - "com.docker.backend"
 
