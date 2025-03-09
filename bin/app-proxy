@@ -1,3 +1,5 @@
 #!/usr/bin/env node
 
+process.title = 'app-proxy';
+
 require('../src/index.js');
