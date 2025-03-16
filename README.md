@@ -30,7 +30,7 @@
 
 1. 克隆代码仓库:
 ```bash
-git clone https://github.com/yourusername/app-proxy-nodejs.git
+git clone git@github.com:mescp/app-proxy-nodejs.git
 cd app-proxy-nodejs
 ```
 
