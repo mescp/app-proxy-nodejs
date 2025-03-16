@@ -18,3 +18,4 @@ error.log
 # Environment variables
 .env
 .env.local
+.cursor/mcp.json

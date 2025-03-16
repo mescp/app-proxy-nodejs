@@ -26,9 +26,17 @@ class ProxyServer {
         for (const [proxyAddr, domains] of Object.entries(this.config.proxy_domain_map)) {
             if (domains.some(domain => {
                 // 支持通配符匹配，如 *.google.com
-                const pattern = domain.replace(/\./g, '\\.').replace(/\*/g, '.*');
-                const regex = new RegExp(`^${pattern}$`, 'i');
-                return regex.test(host);
+                // 如果是 *.domain.com 形式,需要同时匹配 domain.com
+                if (domain.startsWith('*.')) {
+                    const baseDomain = domain.slice(2);
+                    const pattern = domain.replace(/\./g, '\\.').replace(/\*/g, '.*');
+                    const regex = new RegExp(`^(${pattern}|${baseDomain})$`, 'i');
+                    return regex.test(host);
+                } else {
+                    const pattern = domain.replace(/\./g, '\\.').replace(/\*/g, '.*');
+                    const regex = new RegExp(`^${pattern}$`, 'i');
+                    return regex.test(host);
+                }
             })) {
                 const [host, port] = proxyAddr.split(':');
                 return { host, port: parseInt(port) };
